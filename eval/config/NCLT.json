@@ -1,6 +1,6 @@
 {
     "dataset": "NCLT",
-    "seq": "2013-01-10",
+    "seq": "2012-11-17",
     "dist_idx": 10,
     "test_count": 100,
     "feat": "FasterPFH",

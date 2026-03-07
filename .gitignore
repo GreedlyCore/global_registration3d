@@ -7,6 +7,9 @@ logs/
 utils/
 results/
 
+# your locally installed python env
+.venv2/
+
 MAC/src/build
 MAC/src/build_pybind
 TEASER-plusplus/
