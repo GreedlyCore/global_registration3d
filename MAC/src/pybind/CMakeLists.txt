@@ -1,0 +1,94 @@
+cmake_minimum_required(VERSION 3.22)
+project(mac_solver)
+
+set(CMAKE_CXX_STANDARD 14)
+
+# ------------------------------------------------------------------ #
+# Build type
+# ------------------------------------------------------------------ #
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# ------------------------------------------------------------------ #
+# Dependencies
+# ------------------------------------------------------------------ #
+find_package(PCL REQUIRED)
+
+# igraph: prefer 0.10.6, fall back to 0.9.9
+find_package(igraph 0.10.6 EXACT QUIET)
+if(NOT igraph_FOUND)
+    message(STATUS "igraph 0.10.6 not found, trying 0.9.9")
+    find_package(igraph 0.9.9 EXACT REQUIRED)
+    set(IGRAPH_VERSION_OLD TRUE)
+    message(WARNING "igraph 0.9.9 has a known memory leak. Upgrade to 0.10.6 if possible.")
+endif()
+
+find_package(OpenMP REQUIRED)
+
+# pybind11 — try cmake config first, then fall back to python -m pybind11
+find_package(pybind11 QUIET CONFIG)
+if(NOT pybind11_FOUND)
+    execute_process(
+        COMMAND python3 -m pybind11 --cmakedir
+        OUTPUT_VARIABLE pybind11_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE pybind11_CMD_RESULT
+    )
+    if(NOT pybind11_CMD_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "pybind11 not found. Install it with:\n"
+            "  pip install pybind11\n"
+            "or:\n"
+            "  apt install python3-pybind11")
+    endif()
+    find_package(pybind11 REQUIRED CONFIG PATHS ${pybind11_DIR})
+endif()
+
+# ------------------------------------------------------------------ #
+# OpenMP flags
+# ------------------------------------------------------------------ #
+set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   ${OpenMP_C_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+
+# ------------------------------------------------------------------ #
+# MAC source files (in parent dir)
+# ------------------------------------------------------------------ #
+set(SRC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(MAC_SOURCES
+    ${SRC}/funcs.cpp
+    ${SRC}/PCR.cpp
+    ${SRC}/registration.cpp
+    ${SRC}/desc_dec.cpp
+    ${SRC}/mac_bind.cpp
+)
+
+include_directories(${PCL_INCLUDE_DIRS} ${SRC})
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
+
+# ------------------------------------------------------------------ #
+# Shared library target (pybind11 module)
+# ------------------------------------------------------------------ #
+pybind11_add_module(mac_solver ${MAC_SOURCES})
+
+if(IGRAPH_VERSION_OLD)
+    target_compile_definitions(mac_solver PRIVATE IGRAPH_VERSION_OLD)
+endif()
+
+target_link_libraries(mac_solver PRIVATE
+    ${PCL_LIBRARIES}
+    igraph::igraph
+    OpenMP::OpenMP_CXX
+)
+
+# ------------------------------------------------------------------ #
+# Install the .so next to reg_pipe.py
+# ------------------------------------------------------------------ #
+set(PIPELINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../eval")
+
+set_target_properties(mac_solver PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${PIPELINE_DIR}"
+)
+
+message(STATUS "mac_solver.so will be placed in: ${PIPELINE_DIR}")

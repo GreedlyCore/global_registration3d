@@ -1,0 +1,6 @@
+[submodule "KISS-Matcher"]
+	path = KISS-Matcher
+	url = https://github.com/GreedlyCore/KISS-Matcher.git
+[submodule "third_party/igraph"]
+	path = third_party/igraph
+	url = https://github.com/igraph/igraph.git

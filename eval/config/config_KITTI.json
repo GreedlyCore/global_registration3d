@@ -1,0 +1,28 @@
+{
+    "dataset": "KITTI",
+    "seq": "01",
+    "dist_idx": 2,
+    "test_count": 500,
+    "feat": "FPFH",
+    "reg": "teaser",
+    "voxel_size": 0.8,
+    "re_thre": 10.0,
+    "te_thre": 2.0,
+    "out_dir": "results",
+    "seed": 42,
+    "teaser": {
+        "cbar2": 1.0,
+        "estimate_scaling": false,
+        "inlier_selection_mode": "PMC_EXACT",
+        "rotation_tim_graph": "CHAIN",
+        "rotation_estimation_algorithm": "GNC_TLS",
+        "rotation_gnc_factor": 1.4,
+        "rotation_max_iterations": 10000,
+        "rotation_cost_threshold": 1e-16
+    },
+    "mac": {
+        "inlier_thresh": null,
+        "cmp_thresh": 0.99,
+        "min_clique_sz": 3
+    }
+}

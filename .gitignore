@@ -1,0 +1,18 @@
+
+.claude
+
+# could be dataset data or symlinks that transfer to it
+data/
+logs/
+utils/
+results/
+
+MAC/src/build
+MAC/src/build_pybind
+TEASER-plusplus/
+eval/*.so
+
+TODO.md
+README.md
+read_later.md
+Quatro/
