@@ -1,7 +1,6 @@
 import open3d as o3d
 import numpy as np 
 from scipy.spatial import cKDTree
-import teaserpp_python
 
 def pcd2xyz(pcd):
     return np.asarray(pcd.points).T
@@ -58,6 +57,7 @@ def get_teaser_solver(noise_bound, cfg=None):
                         rotation_max_iterations    (10000)
                         rotation_cost_threshold    (1e-16)
     """
+    import teaserpp_python
     if cfg is None:
         cfg = {}
 
@@ -115,6 +115,37 @@ def get_mac_solver_params(noise_bound, cfg=None):
         'inlier_thresh': float(inlier_thresh),
         'cmp_thresh':    float(cfg.get('cmp_thresh',    0.99)),
         'min_clique_sz': int(  cfg.get('min_clique_sz', 3)),
+    }
+
+
+def get_quatro_solver_params(noise_bound, cfg=None):
+    """Return kwargs dict for quatro_solver.quatro_solve from config.
+
+    Args:
+        noise_bound : fallback for noise_bound when cfg['noise_bound'] is null/None
+        cfg         : optional dict of overrides from the JSON "quatro" block.
+                      Supported keys and their defaults:
+                        noise_bound              (null -> noise_bound)
+                        cbar2                    (1.0)
+                        estimate_scaling         (False)
+                        rotation_gnc_factor      (1.4)
+                        rotation_max_iterations  (100)
+                        rotation_cost_threshold  (1e-6)
+                        inlier_selection_mode    (1)  # 0=PMC_EXACT, 1=PMC_HEU, 2=KCORE_HEU, 3=NONE
+                        rotation_tim_graph       (0)  # 0=CHAIN, 1=COMPLETE
+    """
+    if cfg is None:
+        cfg = {}
+    quattro_noise_bound = cfg.get('noise_bound') or noise_bound
+    return {
+        'noise_bound': float(quattro_noise_bound),
+        'cbar2': float(cfg.get('cbar2', 1.0)),
+        'estimate_scaling': bool(cfg.get('estimate_scaling', False)),
+        'rotation_gnc_factor': float(cfg.get('rotation_gnc_factor', 1.4)),
+        'rotation_max_iterations': int(cfg.get('rotation_max_iterations', 100)),
+        'rotation_cost_threshold': float(cfg.get('rotation_cost_threshold', 1e-6)),
+        'inlier_selection_mode': int(cfg.get('inlier_selection_mode', 1)),
+        'rotation_tim_graph': int(cfg.get('rotation_tim_graph', 0)),
     }
 
 

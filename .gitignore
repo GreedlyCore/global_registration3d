@@ -1,11 +1,14 @@
 
 .claude
 
+
 # could be dataset data or symlinks that transfer to it
 data/
 logs/
 utils/
 results/
+eval/__pycache__/*
+imgui.ini
 
 # your locally installed python env
 .venv2/
@@ -15,7 +18,9 @@ MAC/src/build_pybind
 TEASER-plusplus/
 eval/*.so
 
+path1.md
+CLAUDE.md
 TODO.md
 README.md
 read_later.md
-Quatro/
+table_plot_ideas.md

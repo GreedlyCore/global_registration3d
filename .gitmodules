@@ -4,3 +4,6 @@
 [submodule "third_party/igraph"]
 	path = third_party/igraph
 	url = https://github.com/igraph/igraph.git
+[submodule "Quatro"]
+	path = Quatro
+	url = https://github.com/GreedlyCore/Quatro.git

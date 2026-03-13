@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 """
-Datasets (KITTI/NCLT) loading utilities.
+Datasets (KITTI/NCLT/MulRan) loading utilities.
 """
 import os
 import numpy as np
 import open3d as o3d
 import scipy.interpolate
 
-# SETUP according your data destination folder or create symlinks. #TODO how to refactor and handle this properly ???
-KITTI_DIR = "/home/sonieth3/thesis/investigate/data/KITTI"
-NCLT_DIR  = "/home/sonieth3/thesis/investigate/data/NCLT"
-
+# TODO: SETUP this according your datasets destination folder or create symlinks
+KITTI_DIR = os.path.expanduser("~/thesis/global_registration3d/data/KITTI")
+NCLT_DIR  = os.path.expanduser("~/thesis/global_registration3d/data/NCLT")
+MULRAN_DIR = os.path.expanduser("~/thesis/global_registration3d/data/MulRan")
 
 def load_kitti_velodyne(filepath):
     """
@@ -216,4 +216,156 @@ def load_nclt_dataset(seq):
     Returns (scan_files, poses, eye(4)) — Tr=eye(4) since poses are already in sensor frame.
     """
     poses, scan_files = load_nclt_ground_truth(seq, NCLT_DIR)
+    return scan_files, poses, np.eye(4)
+
+
+# ─────────────────────────────── MulRan ───────────────────────────────────── #
+
+def load_mulran_ouster(filepath):
+    """
+    Load one MulRan Ouster scan from a KITTI-style .bin file.
+
+    Returns:
+        Nx4 float32 array (x, y, z, intensity)
+    """
+    return np.fromfile(filepath, dtype=np.float32).reshape(-1, 4)
+
+
+def load_mulran_ouster_pcd(filepath):
+    """Load one MulRan Ouster .bin file as an open3d PointCloud."""
+    pts = load_mulran_ouster(filepath)[:, :3]
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(pts.astype(np.float64))
+    return pcd
+
+
+def _mulran_base_to_ouster_transform():
+    """
+    Static transform from MulRan base_link to Ouster.
+
+    Translation is in metres. Rotation is from roll/pitch/yaw in degrees.
+    """
+    tx, ty, tz = 1.7042, -0.021, 1.8047
+    roll_deg, pitch_deg, yaw_deg = 0.0001, 0.0003, 179.6654
+
+    roll = np.deg2rad(roll_deg)
+    pitch = np.deg2rad(pitch_deg)
+    yaw = np.deg2rad(yaw_deg)
+
+    cr, sr = np.cos(roll), np.sin(roll)
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    cy, sy = np.cos(yaw), np.sin(yaw)
+
+    Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+    Ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
+    Rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
+
+    T = np.eye(4)
+    T[:3, :3] = Rz @ Ry @ Rx
+    T[:3, 3] = [tx, ty, tz]
+    return T
+
+
+def _load_mulran_global_poses(global_pose_file):
+    """
+    Load MulRan global_pose.csv.
+
+    Returns:
+        pose_ts: (N,) int64 timestamps
+        poses_world_base: list of 4x4 world->base transforms
+    """
+    pose_rows = np.loadtxt(global_pose_file, delimiter=',', dtype=np.float64)
+    if pose_rows.ndim == 1:
+        pose_rows = pose_rows[None, :]
+    if pose_rows.shape[1] != 13:
+        raise ValueError(
+            f'Expected 13 columns in global_pose.csv, got {pose_rows.shape[1]}')
+
+    pose_ts = pose_rows[:, 0].astype(np.int64)
+    poses_world_base = []
+    for row in pose_rows:
+        T = np.eye(4)
+        T[:3, :] = row[1:].reshape(3, 4)
+        poses_world_base.append(T)
+    return pose_ts, poses_world_base
+
+
+def _load_mulran_ouster_timestamps(data_stamp_file):
+    """Load Ouster timestamps from data_stamp.csv."""
+    ouster_ts = []
+    with open(data_stamp_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            ts_str, sensor = line.split(',', 1)
+            if sensor == 'ouster':
+                ouster_ts.append(int(ts_str))
+    return np.array(ouster_ts, dtype=np.int64)
+
+
+def load_mulran_ground_truth(seq, mulran_dir):
+    """
+    Load MulRan GT poses, one per Ouster scan.
+
+    global_pose.csv contains timestamp + 3x4 world->base pose. We convert that
+    to world->ouster using the static base_link->ouster transform.
+
+    Args:
+        seq: sequence name, e.g. 'DCC02'
+        mulran_dir: root MulRan dir containing '<seq>/'
+
+    Returns:
+        poses: list of 4x4 world->ouster transforms
+        scan_files: list of Ouster .bin paths sorted by timestamp
+    """
+    seq_dir = os.path.join(os.path.expanduser(mulran_dir), seq)
+    global_pose_file = os.path.join(seq_dir, 'global_pose.csv')
+    data_stamp_file = os.path.join(seq_dir, 'data_stamp.csv')
+    ouster_dir = os.path.join(seq_dir, 'Ouster')
+
+    if not os.path.exists(global_pose_file):
+        raise FileNotFoundError(f'global_pose.csv not found: {global_pose_file}')
+    if not os.path.exists(data_stamp_file):
+        raise FileNotFoundError(f'data_stamp.csv not found: {data_stamp_file}')
+    if not os.path.isdir(ouster_dir):
+        raise FileNotFoundError(f'Ouster dir not found: {ouster_dir}')
+
+    pose_ts, poses_world_base = _load_mulran_global_poses(global_pose_file)
+    ouster_ts_from_csv = set(_load_mulran_ouster_timestamps(data_stamp_file).tolist())
+
+    scan_files = sorted(
+        [os.path.join(ouster_dir, f) for f in os.listdir(ouster_dir) if f.endswith('.bin')]
+    )
+    scan_ts = np.array(
+        [int(os.path.splitext(os.path.basename(f))[0]) for f in scan_files],
+        dtype=np.int64)
+
+    if ouster_ts_from_csv:
+        keep_mask = np.array([ts in ouster_ts_from_csv for ts in scan_ts], dtype=bool)
+        scan_ts = scan_ts[keep_mask]
+        scan_files = [f for f, keep in zip(scan_files, keep_mask) if keep]
+
+    if len(scan_files) == 0:
+        raise RuntimeError(f'No MulRan Ouster scans found for seq {seq}')
+
+    T_base_ouster = _mulran_base_to_ouster_transform()
+    poses_world_ouster = []
+    pose_ts_arr = np.asarray(pose_ts)
+    for ts in scan_ts:
+        nearest_idx = int(np.argmin(np.abs(pose_ts_arr - ts)))
+        poses_world_ouster.append(poses_world_base[nearest_idx] @ T_base_ouster)
+
+    print(f'Loaded {len(poses_world_ouster)} MulRan poses for seq {seq}')
+    return poses_world_ouster, scan_files
+
+
+def load_mulran_dataset(seq):
+    """
+    High-level loader for a MulRan sequence.
+
+    Returns (scan_files, poses, eye(4)) — Tr=eye(4) because poses are converted
+    to the Ouster sensor frame.
+    """
+    poses, scan_files = load_mulran_ground_truth(seq, MULRAN_DIR)
     return scan_files, poses, np.eye(4)

@@ -1,24 +1,17 @@
 #!/usr/bin/env python
 """
-Preprocessing setup visualizer for VIRAL and NCLT datasets.
+Preprocessing setup visualizer for KITTI and NCLT datasets.
 Visualizes point clouds with configurable filters: every-n, radius, voxel, mahal.
 
 Usage:
-    python visualize/preprocessing_setup.py --dataset viral --scene eee_03
+    python visualize/preprocessing_setup.py --dataset kitti --scene 01
+    python visualize/preprocessing_setup.py --dataset kitti --scene 04
     python visualize/preprocessing_setup.py --dataset nclt  --scene 2013-01-10
 """
 
 """
 ~3676 idx: pre indoor scene index
 ~3880 - 4070 idx: starting indoor scene index (там его ещё шатают вперёд назад неплохо так)
-
-python3 create_and_save_gmm_nclt.py \
-    --scene 2013-01-10 \
-    --every-n 5 \
-    --voxel 0.05 \
-    --start-id 3880 --end-id 4070 \
-    --mahal 2.0 \
-    --n_components 150
 """
 
 import os
@@ -28,19 +21,25 @@ import numpy as np
 from pyridescence import guik, imgui
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '../../../../../'))
-sys.path.insert(0, os.path.join(SCRIPT_DIR, '..'))
-from utils.viral_loader import (
-    load_viral_lidar_config, load_viral_pointcloud,
-    get_viral_scan_count, apply_transform
-)
-from utils.nclt_loader import (
-    get_nclt_sync_files, get_nclt_scan_count, load_nclt_pointcloud
-)
+REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
+sys.path.insert(0, REPO_ROOT)
+from utils.kitti_loader import load_kitti_velodyne
+from utils.nclt_loader import get_nclt_sync_files, load_nclt_pointcloud
 from utils.pcl_filters import voxel_filter, radius_filter, every_n_filter, mahal_filter
 
-VIRAL_BASE_PATH = os.path.join(REPO_ROOT, 'dataset/viral')
-NCLT_BASE_PATH = os.path.expanduser('~/thesis/data')
+KITTI_BASE_PATH = os.path.join(REPO_ROOT, 'data', 'KITTI')
+NCLT_BASE_PATH  = os.path.join(REPO_ROOT, 'data', 'NCLT')
+
+
+def _get_kitti_scan_files(scene):
+    vel_dir = os.path.join(KITTI_BASE_PATH, 'sequences', scene, 'velodyne')
+    if not os.path.isdir(vel_dir):
+        raise FileNotFoundError(f'KITTI velodyne directory not found: {vel_dir}')
+    return sorted(
+        os.path.join(vel_dir, f)
+        for f in os.listdir(vel_dir)
+        if f.endswith('.bin')
+    )
 
 
 class PreprocessingVisualizer:
@@ -49,22 +48,14 @@ class PreprocessingVisualizer:
         self.scene = scene
         self.current_index = 0
 
-        if dataset == 'viral':
-            bag_path = os.path.join(VIRAL_BASE_PATH, scene, f'{scene}.bag')
-            if not os.path.exists(bag_path):
-                raise FileNotFoundError(f'Bag not found: {bag_path}')
-            self.bag_path = bag_path
-
-            config_topic, self.T_body_lidar = load_viral_lidar_config(bag_path)
-            self.lidar_topic = config_topic or '/os1_cloud_node1/points'
-
-            print(f'Counting scans in {bag_path}...')
-            self.total_scans = get_viral_scan_count(bag_path, self.lidar_topic)
-            print(f'VIRAL / {scene} ({self.total_scans} scans), topic: {self.lidar_topic}')
+        if dataset == 'kitti':
+            self.scan_files = _get_kitti_scan_files(scene)
+            self.total_scans = len(self.scan_files)
+            print(f'KITTI / seq {scene} ({self.total_scans} scans)')
 
         elif dataset == 'nclt':
-            self.nclt_files = get_nclt_sync_files(NCLT_BASE_PATH, scene)
-            self.total_scans = len(self.nclt_files)
+            self.scan_files = get_nclt_sync_files(NCLT_BASE_PATH, scene)
+            self.total_scans = len(self.scan_files)
             print(f'NCLT / {scene} ({self.total_scans} scans)')
 
         # Filter state (order matches create_and_save_gmm_viral.py pipeline)
@@ -72,7 +63,7 @@ class PreprocessingVisualizer:
         self.every_n = 20
 
         self.radius_enabled = False
-        self.radius_max = 50.0
+        self.radius_max = 100.0
 
         self.voxel_enabled = False
         self.voxel_size = 0.5
@@ -91,14 +82,13 @@ class PreprocessingVisualizer:
         self.frame_counter = 0
 
     def _load_pointcloud(self, index):
-        if self.dataset == 'viral':
-            points = load_viral_pointcloud(self.bag_path, index, self.lidar_topic)
-            points = apply_transform(points, self.T_body_lidar)
+        if self.dataset == 'kitti':
+            points = load_kitti_velodyne(self.scan_files[index])
         else:  # nclt
-            points = load_nclt_pointcloud(self.nclt_files[index])
+            points = load_nclt_pointcloud(self.scan_files[index])
         original = len(points)
 
-        # Apply filters in same order as create_and_save_gmm_viral.py
+        # Apply filters
         if self.every_n_enabled:
             points = every_n_filter(points, n=self.every_n, verbose=False)
         if self.radius_enabled:
@@ -193,7 +183,7 @@ class PreprocessingVisualizer:
             changed, self.radius_enabled = imgui.checkbox("Radius filter", self.radius_enabled)
             filters_changed |= changed
             if self.radius_enabled:
-                changed, self.radius_max = imgui.slider_float("  Max radius (m)", self.radius_max, 0.0, 50.0)
+                changed, self.radius_max = imgui.slider_float("  Max radius (m)", self.radius_max, 0.0, 100.0)
                 filters_changed |= changed
 
             changed, self.voxel_enabled = imgui.checkbox("Voxel filter", self.voxel_enabled)
@@ -245,10 +235,10 @@ class PreprocessingVisualizer:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Preprocessing setup visualizer for VIRAL/NCLT datasets')
-    parser.add_argument('--dataset', type=str, required=True, choices=['viral', 'nclt'])
+    parser = argparse.ArgumentParser(description='Preprocessing setup visualizer for KITTI/NCLT datasets')
+    parser.add_argument('--dataset', type=str, required=True, choices=['kitti', 'nclt'])
     parser.add_argument('--scene', type=str, required=True,
-                        help='Scene name (e.g., eee_03 for VIRAL, 2013-01-10 for NCLT)')
+                        help='Sequence ID: 01/04 for KITTI, 2013-01-10 for NCLT')
     args = parser.parse_args()
 
     visualizer = PreprocessingVisualizer(args.dataset, args.scene)

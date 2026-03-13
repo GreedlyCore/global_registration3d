@@ -1,10 +1,10 @@
 """
-Evaluate a registration pipeline on KITTI / NCLT sequences.
+Evaluate a registration pipeline on KITTI / NCLT / ... sequences.
 
 Usage:
-    cd ~/thesis/investigate
+    cd ~/thesis/global_registration3d
     source start.sh
-    python eval/test.py --config eval/config/config_KITTI.json
+    python eval/test.py --config eval/config/KITTI.json
 """
 
 import sys
@@ -14,102 +14,73 @@ import csv
 import json
 import argparse
 import logging
+from typing import List, Dict, Any
+
 import numpy as np
 from tqdm import tqdm
 
-from dataset_loader import (
-    load_kitti_dataset, load_kitti_velodyne_pcd,
-    load_nclt_dataset,  load_nclt_velodyne_pcd,
+from test_utils import (
+    Metrics,
+    load_dataset_loader, generate_pairs, create_result_directory,
+    gt_transform, compute_metrics,
 )
 from reg_pipe import run_registration
 
 
-# --------------------------------------------------------------------------- #
-# Geometry helpers
-# --------------------------------------------------------------------------- #
-
-def rotation_error(R_pred, R_gt):
-    """RRE in degrees."""
-    cos_angle = np.clip((np.trace(R_pred.T @ R_gt) - 1.0) / 2.0, -1.0, 1.0)
-    return float(np.degrees(np.arccos(cos_angle)))
-
-
-def translation_error(t_pred, t_gt):
-    """RTE (L2 norm)."""
-    return float(np.linalg.norm(t_pred.ravel() - t_gt.ravel()))
-
-
-def gt_transform(poses, Tr, src_idx, tgt_idx):
+def eval_sequence(args: argparse.Namespace) -> List[Dict[str, Any]]:
     """
-    Ground-truth relative transform src → tgt.
-    KITTI: poses are camera-frame, Tr is velodyne→camera.
-    NCLT:  poses are world-frame (body→world), Tr=eye(4).
+    Evaluate registration pipeline on a dataset sequence.
+    
+    Args:
+        args: parsed command-line arguments
+    
+    Returns:
+        List of result rows (each row is a dict with metrics for one pair)
     """
-    Tr_inv = np.linalg.inv(Tr)
-    return Tr_inv @ np.linalg.inv(poses[tgt_idx]) @ poses[src_idx] @ Tr
-
-
-# --------------------------------------------------------------------------- #
-# Main evaluation
-# --------------------------------------------------------------------------- #
-
-def eval_sequence(args):
+    # Load dataset
+    scan_files, poses, Tr, load_pcd, seq = load_dataset_loader(args.dataset, args.seq)
     dataset = args.dataset.upper()
-
-    if dataset == 'KITTI':
-        seq = args.seq.zfill(2)
-        scan_files, poses, Tr = load_kitti_dataset(seq)
-        load_pcd = load_kitti_velodyne_pcd
-    elif dataset == 'NCLT':
-        seq = args.seq
-        scan_files, poses, Tr = load_nclt_dataset(seq)
-        load_pcd = load_nclt_velodyne_pcd
-    else:
-        raise ValueError(f'Unknown dataset: {args.dataset}')
-
     total_scans = len(scan_files)
 
-    # ------------------------------------------------------------------ #
-    # Sample random pairs
-    # ------------------------------------------------------------------ #
-    max_src = total_scans - args.dist_idx - 1
-    if max_src < 0:
-        raise ValueError(
-            f'dist_idx={args.dist_idx} too large for {total_scans} scans')
+    # Generate pairs
+    test_type = getattr(args, 'test_type', 'random')
+    pairs = generate_pairs(test_type, args, total_scans, poses, Tr)
 
-    rng = np.random.default_rng(args.seed)
-    src_indices = rng.choice(max_src + 1, size=args.test_count,
-                             replace=args.test_count > max_src + 1)
+    # Setup result directory and config
+    csv_path, config_path, merged_config = create_result_directory(
+        args, test_type, dataset, seq, cfg)
+    
+    # Write config to file
+    with open(config_path, 'w') as f:
+        json.dump(merged_config, f, indent=2)
 
-    # ------------------------------------------------------------------ #
-    # Output CSV
-    # ------------------------------------------------------------------ #
-    os.makedirs(args.out_dir, exist_ok=True)
-    csv_path = os.path.join(
-        args.out_dir,
-        f'{dataset.lower()}_{seq}_dist{args.dist_idx}_{args.feat}_{args.reg}.csv')
+    # Initialize metrics
+    metrics = Metrics(re_threshold=args.re_thre, te_threshold=args.te_thre)
 
+    # CSV fields
     csv_fields = [
         'pair_id', 'src_idx', 'tgt_idx',
         'success', 'RE_deg', 'TE_m', 'gt_dist_m',
-        'feat_time_s', 'corr_time_s', 'reg_time_s', 'total_time_s',
+        'ds_time_s', 'feat_time_s', 'corr_time_s', 'reg_time_s', 'total_time_s',
     ]
 
-    rows = []
+    rows: List[Dict[str, Any]] = []
     n_success = 0
 
+    # Process each pair
     with open(csv_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=csv_fields)
         writer.writeheader()
 
-        for pair_id, src_idx in enumerate(tqdm(src_indices, desc=f'{dataset} {seq}')):
-            src_idx = int(src_idx)
-            tgt_idx = src_idx + args.dist_idx
-
+        for pair_id, (src_idx, tgt_idx) in enumerate(tqdm(pairs, desc=f'{dataset} {seq}')):
+            # Load point clouds
             src_pcd = load_pcd(scan_files[src_idx])
             tgt_pcd = load_pcd(scan_files[tgt_idx])
 
+            # Ground-truth transform
             T_gt = gt_transform(poses, Tr, src_idx, tgt_idx)
+            
+            # Run registration
             T_pred, timings = run_registration(
                 src_pcd, tgt_pcd,
                 voxel_size=args.voxel_size,
@@ -118,22 +89,24 @@ def eval_sequence(args):
                 corr_method='nn',
                 teaser_cfg=args.teaser,
                 mac_cfg=args.mac,
+                quatro_cfg=args.quatro,
             )
 
-            Re = rotation_error(T_pred[:3, :3], T_gt[:3, :3])
-            Te = translation_error(T_pred[:3, 3], T_gt[:3, 3])
-            gt_dist = float(np.linalg.norm(T_gt[:3, 3]))
-            success = int((Re < args.re_thre) and (Te < args.te_thre))
+            # Compute metrics
+            metric_dict = compute_metrics(T_pred, T_gt, metrics)
+            success = metric_dict['success']
             n_success += success
 
+            # Build row
             row = {
                 'pair_id':      pair_id,
                 'src_idx':      src_idx,
                 'tgt_idx':      tgt_idx,
                 'success':      success,
-                'RE_deg':       round(Re, 4),
-                'TE_m':         round(Te, 4),
-                'gt_dist_m':    round(gt_dist, 4),
+                'RE_deg':       round(metric_dict['RE_deg'], 4),
+                'TE_m':         round(metric_dict['TE_m'], 4),
+                'gt_dist_m':    round(metric_dict['gt_dist_m'], 4),
+                'ds_time_s':    round(timings['downsample'], 4),
                 'feat_time_s':  round(timings['feature'], 4),
                 'corr_time_s':  round(timings['correspondence'], 4),
                 'reg_time_s':   round(timings['registration'], 4),
@@ -142,48 +115,42 @@ def eval_sequence(args):
             writer.writerow(row)
             rows.append(row)
 
-        # ---------------------------------------------------------------- #
-        # Summary row
-        # ---------------------------------------------------------------- #
-        succ = [r for r in rows if r['success'] == 1]
-        sr   = n_success / len(rows) * 100
-
-        mean_rre     = float(np.mean([r['RE_deg'] for r in succ])) if succ else float('nan')
-        mean_rte     = float(np.mean([r['TE_m']   for r in succ])) if succ else float('nan')
-        mean_t       = float(np.mean([r['total_time_s'] for r in rows]))
-        mean_gt_dist = float(np.mean([r['gt_dist_m']    for r in rows]))
-
+        # Write summary row
+        summary_stats = metrics.compute_summary(rows)
         writer.writerow({
             'pair_id':      'SUMMARY',
             'src_idx':      '',
-            'tgt_idx':      f'{n_success}/{len(rows)}',
-            'success':      round(sr, 2),
-            'RE_deg':       round(mean_rre, 4),
-            'TE_m':         round(mean_rte, 4),
-            'gt_dist_m':    round(mean_gt_dist, 4),
+            'tgt_idx':      f'{summary_stats["n_success"]}/{summary_stats["n_total"]}',
+            'success':      round(summary_stats['sr_percent'], 2),
+            'RE_deg':       round(summary_stats['mean_rre'], 4),
+            'TE_m':         round(summary_stats['mean_rte'], 4),
+            'gt_dist_m':    round(summary_stats['mean_gt_dist'], 4),
+            'ds_time_s':    round(float(np.mean([r['ds_time_s'] for r in rows])), 4),
             'feat_time_s':  round(float(np.mean([r['feat_time_s'] for r in rows])), 4),
             'corr_time_s':  round(float(np.mean([r['corr_time_s'] for r in rows])), 4),
-            'reg_time_s':   round(float(np.mean([r['reg_time_s']  for r in rows])), 4),
-            'total_time_s': round(mean_t, 4),
+            'reg_time_s':   round(float(np.mean([r['reg_time_s'] for r in rows])), 4),
+            'total_time_s': round(summary_stats['mean_time'], 4),
         })
 
-    failed   = [r for r in rows if r['success'] == 0]
-    fail_rre = float(np.mean([r['RE_deg'] for r in failed])) if failed else float('nan')
-    fail_rte = float(np.mean([r['TE_m']   for r in failed])) if failed else float('nan')
-
     logging.info('*' * 50)
+    mode_info = (
+        f'dist_range=[{args.dist_min},{args.dist_max}]m'
+        if test_type == 'random'
+        else f'scan2scan({len(pairs)} pairs)'
+    )
     logging.info(
-        f"[{dataset}] Seq {seq} | dist_idx={args.dist_idx} | {args.feat}+{args.reg} | N={len(rows)}")
+        f"[{dataset}] Seq {seq} | {mode_info} | {args.feat}+{args.reg} | N={len(rows)}")
     logging.info(
-        f"  SR = {sr:.2f}%  ({n_success}/{len(rows)})  |  "
-        f"Mean RRE = {mean_rre:.2f} deg  |  Mean RTE = {mean_rte:.4f} m  |  "
-        f"Mean GT dist = {mean_gt_dist:.2f} m")
+        f"  SR = {summary_stats['sr_percent']:.2f}%  ({summary_stats['n_success']}/{summary_stats['n_total']})  |  "
+        f"Mean RRE = {summary_stats['mean_rre']:.2f} deg  |  Mean RTE = {summary_stats['mean_rte']:.4f} m  |  "
+        f"Mean GT dist = {summary_stats['mean_gt_dist']:.2f} m")
     logging.info(
-        f"  Failed ({len(failed)})  |  "
-        f"Mean RRE = {fail_rre:.2f} deg  |  Mean RTE = {fail_rte:.4f} m")
+        f"  Failed ({summary_stats['n_failed']})  |  "
+        f"Mean RRE = {summary_stats['fail_rre']:.2f} deg  |  Mean RTE = {summary_stats['fail_rte']:.4f} m")
     logging.info(f"  Results -> {csv_path}")
 
     return rows
+
 
 
 # --------------------------------------------------------------------------- #
@@ -191,31 +158,47 @@ def eval_sequence(args):
 # --------------------------------------------------------------------------- #
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config', required=True)
-    cli = parser.parse_args()
+    # --- pass 1: grab --config only, ignore everything else ---
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument('--config', required=True)
+    pre_args, _ = pre.parse_known_args()
 
-    with open(cli.config) as f:
+    with open(pre_args.config) as f:
         cfg = json.load(f)
 
-    args = argparse.Namespace(
-        dataset    = cfg['dataset'],
-        seq        = str(cfg['seq']),
-        dist_idx   = int(cfg['dist_idx']),
-        test_count = int(cfg['test_count']),
-        feat       = cfg.get('feat',       'FPFH'),
-        reg        = cfg.get('reg',        'teaser'),
-        voxel_size = float(cfg.get('voxel_size', 0.5)),
-        re_thre    = float(cfg.get('re_thre',    10.0)),
-        te_thre    = float(cfg.get('te_thre',    2.0)),
-        out_dir    = cfg.get('out_dir',    'results'),
-        seed       = int(cfg.get('seed',   42)),
-        teaser     = cfg.get('teaser',     {}),
-        mac        = cfg.get('mac',        {}),
-    )
+    # --- pass 2: full parser, JSON values are defaults, CLI wins ---
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config',     required=True)
+    parser.add_argument('--dataset',    default=cfg.get('dataset'))
+    parser.add_argument('--seq',        default=str(cfg.get('seq', '')))
+    parser.add_argument('--dist_min',   type=float, default=cfg.get('dist_min'))
+    parser.add_argument('--dist_max',   type=float, default=cfg.get('dist_max'))
+    parser.add_argument('--test_count', type=int,   default=cfg.get('test_count', 100))
+    parser.add_argument('--feat',       default=cfg.get('feat',       'FPFH'))
+    parser.add_argument('--reg',        default=cfg.get('reg',        'teaser'))
+    parser.add_argument('--voxel_size', type=float, default=cfg.get('voxel_size', 0.5))
+    parser.add_argument('--re_thre',    type=float, default=cfg.get('re_thre',    10.0))
+    parser.add_argument('--te_thre',    type=float, default=cfg.get('te_thre',    2.0))
+    parser.add_argument('--out_dir',    default=cfg.get('out_dir',    'results'))
+    parser.add_argument('--seed',       type=int,   default=cfg.get('seed',       42))
+    parser.add_argument('--test_type',  default=cfg.get('test_type',  'random'),
+                        choices=['random', 'scan2scan'])
+    # teaser/mac/quatro sub-configs are not overridable from CLI (use JSON for those)
+    args = parser.parse_args()
+    args.teaser     = cfg.get('teaser',     {})
+    args.mac        = cfg.get('mac',        {})
+    args.quatro     = cfg.get('quatro',     {})
+    args.test_scans = cfg.get('test_scans', [])
+
+    if args.test_type == 'random' and (args.dist_min is None or args.dist_max is None):
+        parser.error('random mode requires both --dist_min and --dist_max (in meters)')
 
     os.makedirs('logs', exist_ok=True)
-    tag = f"{args.dataset.lower()}_{args.seq}_dist{args.dist_idx}_{args.feat}_{args.reg}"
+    if args.test_type == 'random':
+        dist_tag = f"d{args.dist_min:g}_{args.dist_max:g}"
+    else:
+        dist_tag = 'scan2scan'
+    tag = f"{args.dataset.lower()}_{args.seq}_{dist_tag}_{args.feat}_{args.reg}"
     logging.basicConfig(
         level=logging.INFO,
         format='',
