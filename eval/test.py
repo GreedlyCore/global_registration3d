@@ -151,12 +151,6 @@ def eval_sequence(args: argparse.Namespace) -> List[Dict[str, Any]]:
 
     return rows
 
-
-
-# --------------------------------------------------------------------------- #
-# Entry point
-# --------------------------------------------------------------------------- #
-
 if __name__ == '__main__':
     # --- pass 1: grab --config only, ignore everything else ---
     pre = argparse.ArgumentParser(add_help=False)

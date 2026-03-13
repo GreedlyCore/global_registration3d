@@ -177,7 +177,6 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         )
     elif reg_method == 'quatro':
         quatro_solver = _import_quatro_solver()
-
         quatro_kwargs = get_quatro_solver_params(noise_bound=voxel_size, cfg=quatro_cfg)
         # quatro_solve expects Kx3 float64 arrays.
         T_pred = np.asarray(

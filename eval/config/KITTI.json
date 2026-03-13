@@ -28,7 +28,7 @@
         "min_clique_sz": 3
     },
     "quatro": {
-        "noise_bound": null,
+        "noise_bound": 0.3,
         "cbar2": 1.0,
         "estimate_scaling": false,
         "rotation_gnc_factor": 1.4,
