@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 """
-Sequence pair generator/visualizer for KITTI and NCLT datasets.
+Sequence pair generator/visualizer for KITTI / NCLT / MulRan datasets.
 Shows scan pairs [src_idx, src_idx + dist_idx] with tgt aligned into src frame via GT transform.
-
 Usage:
-    python visualize/generate_seq.py --dataset kitti --scene 01
-    python visualize/generate_seq.py --dataset nclt  --scene 2013-01-10
-
+    <DATASET_NAME> = 'kitti', 'nclt',  'mulran'
+    <SCENE_ID>    = KITTI: '01', '04', ...
+                    NCLT: '2013-01-10', '2013-01-31', ...
+                    MulRan: 'DCC02', 'DCC03', ...
+    python visualize/generate_seq.py --dataset <DATASET_NAME> --scene <SCENE_ID> 
 Controls:
     Space  : advance to next pair  [idx → idx+1, tgt = idx+1 + dist_idx]
 """
@@ -76,31 +77,15 @@ from pyridescence import guik, imgui
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT   = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
 sys.path.insert(0, os.path.join(REPO_ROOT, 'eval'))
+sys.path.insert(0, REPO_ROOT)
 
 from dataset_loader import (
     load_kitti_dataset, load_kitti_velodyne_pcd,
     load_nclt_dataset,  load_nclt_velodyne_pcd,
+    load_mulran_dataset, load_mulran_ouster_pcd,
 )
-
-
-# --------------------------------------------------------------------------- #
-# Geometry helpers (mirrors eval/test.py)
-# --------------------------------------------------------------------------- #
-
-def gt_transform(poses, Tr, src_idx, tgt_idx):
-    """Ground-truth relative transform: src frame → tgt frame."""
-    Tr_inv = np.linalg.inv(Tr)
-    return Tr_inv @ np.linalg.inv(poses[tgt_idx]) @ poses[src_idx] @ Tr
-
-
-def rotation_angle_deg(R):
-    cos_angle = np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)
-    return float(np.degrees(np.arccos(cos_angle)))
-
-
-# --------------------------------------------------------------------------- #
-# Visualizer
-# --------------------------------------------------------------------------- #
+from helpers import gt_transform, rotation_angle_deg
+from utils.pcl_filters import voxel_filter, radius_filter, remove_plane_ransac
 
 class SeqPairVisualizer:
     def __init__(self, dataset, scene):
@@ -113,6 +98,9 @@ class SeqPairVisualizer:
         elif dataset == 'nclt':
             self.scan_files, self.poses, self.Tr = load_nclt_dataset(scene)
             self.load_pcd = load_nclt_velodyne_pcd
+        elif dataset == 'mulran':
+            self.scan_files, self.poses, self.Tr = load_mulran_dataset(scene.upper())
+            self.load_pcd = load_mulran_ouster_pcd
         else:
             raise ValueError(f'Unknown dataset: {dataset}')
 
@@ -126,10 +114,24 @@ class SeqPairVisualizer:
         self.gt_dist    = 0.0
         self.gt_rot_deg = 0.0
 
-        # Rendering
-        self.point_size = 0.05
+        # Filters
+        self.radius_enabled  = False
+        self.radius          = 50.0
+        self.voxel_enabled   = False
+        self.voxel_size      = 0.5
+        self.plane_enabled   = False
+        self.ransac_distance = 0.3
+        self.ransac_iters    = 1000
 
-    # ------------------------------------------------------------------ #
+        # Rendering
+        self.point_size    = 0.05
+        self.colormap      = 'default'   # 'default' keeps green/red src/tgt
+        self.colormap_idx  = 0
+
+        # Playback
+        self.auto_play    = False
+        self.play_speed   = 1
+        self.frame_counter = 0
 
     def _clamp_src(self):
         """Ensure src_idx is valid for current dist_idx."""
@@ -141,6 +143,12 @@ class SeqPairVisualizer:
         """Step src_idx forward by 1 (wraps at end)."""
         max_src = self.total_scans - self.dist_idx - 1
         self.src_idx = (self.src_idx + 1) % (max_src + 1)
+        self.tgt_idx = self.src_idx + self.dist_idx
+
+    def _retreat(self):
+        """Step src_idx backward by 1 (wraps at start)."""
+        max_src = self.total_scans - self.dist_idx - 1
+        self.src_idx = (self.src_idx - 1) % (max_src + 1)
         self.tgt_idx = self.src_idx + self.dist_idx
 
     def _load_and_update(self, viewer):
@@ -160,6 +168,16 @@ class SeqPairVisualizer:
         src_pts = np.asarray(src_pcd.points).astype(np.float32)
         tgt_pts = np.asarray(tgt_pcd.points).astype(np.float32)
 
+        # Apply filters to both clouds
+        for apply, fn in [
+            (self.radius_enabled,  lambda p: radius_filter(p, 0.5, self.radius, verbose=False)),
+            (self.voxel_enabled,   lambda p: voxel_filter(p, self.voxel_size, verbose=False)),
+            (self.plane_enabled,   lambda p: remove_plane_ransac(p, self.ransac_distance, 3, self.ransac_iters, verbose=False)),
+        ]:
+            if apply:
+                src_pts = fn(src_pts)
+                tgt_pts = fn(tgt_pts)
+
         # Bring tgt into src frame:  p_src = T_gt^-1 @ p_tgt
         T_inv = np.linalg.inv(T_gt)
         R_inv = T_inv[:3, :3].astype(np.float32)
@@ -177,10 +195,17 @@ class SeqPairVisualizer:
             src_pts   = src_pts   @ R_ned_enu.T
             tgt_in_src = tgt_in_src @ R_ned_enu.T
 
-        viewer.update_points("src", src_pts,    guik.FlatGreen())
-        viewer.update_points("tgt", tgt_in_src, guik.FlatRed())
+        src_shader, tgt_shader = self._get_shaders()
+        viewer.update_points("src", src_pts,    src_shader)
+        viewer.update_points("tgt", tgt_in_src, tgt_shader)
 
-    # ------------------------------------------------------------------ #
+    def _get_shaders(self):
+        shader_pairs = {
+            'default':     (guik.FlatGreen(), guik.FlatRed()),
+            'blue/orange': (guik.FlatBlue(),  guik.FlatOrange()),
+            'rainbow/red': (guik.Rainbow(),   guik.FlatRed()),
+        }
+        return shader_pairs.get(self.colormap, (guik.FlatGreen(), guik.FlatRed()))
 
     def run(self):
         viewer = guik.LightViewer.instance()
@@ -190,6 +215,8 @@ class SeqPairVisualizer:
 
         self._clamp_src()
         self._load_and_update(viewer)
+
+        colormaps = ['default', 'blue/orange', 'rainbow/red']
 
         def ui_callback():
             imgui.begin("Controls", None)
@@ -229,19 +256,66 @@ class SeqPairVisualizer:
 
             imgui.separator()
 
-            if imgui.button("Next pair [Space]"):
+            if imgui.button("< Prev [A]"):
+                self._retreat()
+                self._load_and_update(viewer)
+            imgui.same_line()
+            if imgui.button("Next [Space] >"):
                 self._advance()
                 self._load_and_update(viewer)
 
             imgui.separator()
 
+            # Auto-play
+            changed, self.auto_play = imgui.checkbox("Auto-play", self.auto_play)
+            if self.auto_play:
+                _, self.play_speed = imgui.slider_int("Speed", self.play_speed, 1, 10)
+
+            imgui.separator()
+
+            # Rendering
+            imgui.text_colored(np.array([1.0, 0.8, 0.3, 1.0], dtype=np.float32), "Rendering:")
             changed, new_size = imgui.slider_float("Point size", self.point_size, 0.01, 2.0)
             if changed:
                 self.point_size = new_size
                 viewer.set_point_shape(self.point_size, metric=True, circle=True)
 
+            changed, self.colormap_idx = imgui.combo("Colormap", self.colormap_idx, colormaps)
+            if changed:
+                self.colormap = colormaps[self.colormap_idx]
+                self._load_and_update(viewer)
+
             imgui.separator()
-            imgui.text("Space : next pair")
+
+            # Filters
+            imgui.text_colored(np.array([0.5, 0.8, 1.0, 1.0], dtype=np.float32), "Filters:")
+            filters_changed = False
+
+            changed, self.radius_enabled = imgui.checkbox("Radius filter", self.radius_enabled)
+            filters_changed |= changed
+            if self.radius_enabled:
+                changed, self.radius = imgui.slider_float("  Max radius (m)", self.radius, 5.0, 100.0)
+                filters_changed |= changed
+
+            changed, self.voxel_enabled = imgui.checkbox("Voxel filter", self.voxel_enabled)
+            filters_changed |= changed
+            if self.voxel_enabled:
+                changed, self.voxel_size = imgui.slider_float("  Voxel size (m)", self.voxel_size, 0.05, 1.0)
+                filters_changed |= changed
+
+            changed, self.plane_enabled = imgui.checkbox("Remove plane (RANSAC)", self.plane_enabled)
+            filters_changed |= changed
+            if self.plane_enabled:
+                changed, self.ransac_distance = imgui.slider_float("  Distance thresh", self.ransac_distance, 0.1, 1.0)
+                filters_changed |= changed
+                changed, self.ransac_iters = imgui.slider_int("  Iterations", self.ransac_iters, 100, 5000)
+                filters_changed |= changed
+
+            if filters_changed:
+                self._load_and_update(viewer)
+
+            imgui.separator()
+            imgui.text("Space : next  |  A : prev")
             imgui.end()
 
         viewer.register_ui_callback("controls", ui_callback)
@@ -250,16 +324,23 @@ class SeqPairVisualizer:
             if imgui.is_key_pressed(ord(' ')):
                 self._advance()
                 self._load_and_update(viewer)
+            if imgui.is_key_pressed(ord('A')):
+                self._retreat()
+                self._load_and_update(viewer)
 
-
-# --------------------------------------------------------------------------- #
+            if self.auto_play:
+                self.frame_counter += 1
+                if self.frame_counter >= (60 // self.play_speed):
+                    self.frame_counter = 0
+                    self._advance()
+                    self._load_and_update(viewer)
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Sequence pair generator/visualizer for KITTI/NCLT datasets')
-    parser.add_argument('--dataset', type=str, required=True, choices=['kitti', 'nclt'])
+        description='Sequence pair generator/visualizer for KITTI/NCLT/MulRan datasets')
+    parser.add_argument('--dataset', type=str, required=True, choices=['kitti', 'nclt', 'mulran'])
     parser.add_argument('--scene',   type=str, required=True,
-                        help='Sequence ID: 01/04 for KITTI, 2013-01-10 for NCLT')
+                        help='Sequence ID: 01/04 for KITTI, 2013-01-10 for NCLT, DCC02 for MulRan')
     args = parser.parse_args()
 
     visualizer = SeqPairVisualizer(args.dataset, args.scene)

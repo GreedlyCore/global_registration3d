@@ -10,6 +10,7 @@ from dataset_loader import (
     load_nclt_dataset, load_nclt_velodyne_pcd,
     load_mulran_dataset, load_mulran_ouster_pcd,
 )
+from helpers import gt_transform
 
 class Metrics:
     """Evaluation metrics for pose estimation."""
@@ -193,6 +194,8 @@ def merge_cli_with_json_config(json_cfg: Dict[str, Any], args: argparse.Namespac
         merged['mac'] = args.mac
     if getattr(args, 'quatro', None):
         merged['quatro'] = args.quatro
+    if getattr(args, 'feat_cfg', None):
+        merged['feat_cfg'] = args.feat_cfg
     if args.test_scans:
         merged['test_scans'] = args.test_scans
     
@@ -228,20 +231,6 @@ def create_result_directory(args: argparse.Namespace, test_type: str, dataset: s
     merged_config = merge_cli_with_json_config(cfg, args)
     
     return csv_path, config_path, merged_config
-
-
-def gt_transform(poses: np.ndarray, Tr: np.ndarray, src_idx: int, tgt_idx: int) -> np.ndarray:
-    """
-    Compute ground-truth relative transform src → tgt.
-    
-    KITTI: poses are camera-frame, Tr is velodyne→camera.
-    NCLT:  poses are world-frame (body→world), Tr=eye(4).
-    
-    Returns:
-        (4, 4) transformation matrix
-    """
-    Tr_inv = np.linalg.inv(Tr)
-    return Tr_inv @ np.linalg.inv(poses[tgt_idx]) @ poses[src_idx] @ Tr
 
 
 def compute_metrics(T_pred: np.ndarray, T_gt: np.ndarray, metrics: Metrics) -> Dict[str, float]:

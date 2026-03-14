@@ -13,6 +13,7 @@ from helpers import (
     get_teaser_solver,
     get_mac_solver_params,
     get_quatro_solver_params,
+    resolve_descriptor_params,
     Rt2T,
     pcd2xyz,
 )
@@ -62,7 +63,8 @@ def _import_quatro_solver():
 def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
                      reg_method='teaser', feat_method='FPFH', corr_method='nn',
                      downsample_method='o3d',
-                     teaser_cfg=None, mac_cfg=None, quatro_cfg=None):
+                     teaser_cfg=None, mac_cfg=None, quatro_cfg=None,
+                     feat_cfg=None):
     """
     Feature-based point cloud registration pipeline.
 
@@ -81,9 +83,7 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
     """
     timings = {}
 
-    # ------------------------------------------------------------------ #
-    # KISS-Matcher: full self-contained pipeline
-    # ------------------------------------------------------------------ #
+    # Full self-contained pipeline
     if reg_method == 'kiss':
         import kiss_matcher
         src_np = np.asarray(src_pcd.points).astype(np.float64)
@@ -99,9 +99,7 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         T_pred = Rt2T(np.array(result.rotation), np.array(result.translation))
         return T_pred, timings
 
-    # ------------------------------------------------------------------ #
     # Downsample
-    # ------------------------------------------------------------------ #
     t0 = time.time()
     if downsample_method == 'tbb_vector': # show be superior faster comparing to o3d 
         src_ds = _downsample_tbb(src_pcd, voxel_size)
@@ -111,15 +109,14 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         tgt_ds = tgt_pcd.voxel_down_sample(voxel_size)
     timings['downsample'] = time.time() - t0
 
-    # ------------------------------------------------------------------ #
     # Feature extraction
-    # ------------------------------------------------------------------ #
     t0 = time.time()
+    feat_params = resolve_descriptor_params(voxel_size, cfg=feat_cfg)
     if feat_method == 'FasterPFH':
         from kiss_matcher._kiss_matcher import FasterPFH
-        extractor = FasterPFH(normal_radius=voxel_size * 2,
-                              fpfh_radius=voxel_size * 5,
-                              thr_linearity=0.9)
+        extractor = FasterPFH(normal_radius=feat_params['normal_radius'],
+                              fpfh_radius=feat_params['fpfh_radius'],
+                              thr_linearity=feat_params['thr_linearity'])
         src_xyz, src_feats = extractor.compute(
             np.asarray(src_ds.points).astype(np.float32))
         tgt_xyz, tgt_feats = extractor.compute(
@@ -128,8 +125,8 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         tgt_xyz = tgt_xyz.T   # (3, M)
     elif feat_method == 'FPFH_PCL':  # FPFH via kiss_matcher pybinding 
         from kiss_matcher._kiss_matcher import FPFH
-        extractor = FPFH(normal_radius=voxel_size * 2,
-                         fpfh_radius=voxel_size * 5)
+        extractor = FPFH(normal_radius=feat_params['normal_radius'],
+                         fpfh_radius=feat_params['fpfh_radius'])
         src_xyz, src_feats = extractor.compute(
             np.asarray(src_ds.points).astype(np.float32))
         tgt_xyz, tgt_feats = extractor.compute(
@@ -147,9 +144,7 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         tgt_feats = extract_fpfh(tgt_ds, voxel_size)
     timings['feature'] = time.time() - t0
 
-    # ------------------------------------------------------------------ #
     # Correspondences
-    # ------------------------------------------------------------------ #
     t0 = time.time()
     # corr_method == 'nn'
     corrs_src, corrs_tgt = find_correspondences(src_feats, tgt_feats, mutual_filter=True)
@@ -157,9 +152,7 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
     tgt_corr = tgt_xyz[:, corrs_tgt]   # (3, K)
     timings['correspondence'] = time.time() - t0
 
-    # ------------------------------------------------------------------ #
     # Registration
-    # ------------------------------------------------------------------ #
     t0 = time.time()
     if reg_method == 'teaser':
         solver = get_teaser_solver(noise_bound=voxel_size, cfg=teaser_cfg)

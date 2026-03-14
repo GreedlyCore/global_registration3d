@@ -24,6 +24,7 @@ from test_utils import (
     load_dataset_loader, generate_pairs, create_result_directory,
     gt_transform, compute_metrics,
 )
+from helpers import resolve_feature_cfg
 from reg_pipe import run_registration
 
 
@@ -90,6 +91,7 @@ def eval_sequence(args: argparse.Namespace) -> List[Dict[str, Any]]:
                 teaser_cfg=args.teaser,
                 mac_cfg=args.mac,
                 quatro_cfg=args.quatro,
+                feat_cfg=args.feat_cfg,
             )
 
             # Compute metrics
@@ -182,6 +184,7 @@ if __name__ == '__main__':
     args.teaser     = cfg.get('teaser',     {})
     args.mac        = cfg.get('mac',        {})
     args.quatro     = cfg.get('quatro',     {})
+    args.feat_cfg   = resolve_feature_cfg(cfg, args.feat)
     args.test_scans = cfg.get('test_scans', [])
 
     if args.test_type == 'random' and (args.dist_min is None or args.dist_max is None):

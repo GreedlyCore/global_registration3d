@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Preprocessing setup visualizer for KITTI and NCLT datasets.
+Preprocessing setup visualizer for KITTI, NCLT, and MulRan datasets.
 Visualizes point clouds with configurable filters: every-n, radius, voxel, mahal.
 
 Usage:
@@ -23,9 +23,11 @@ from pyridescence import guik, imgui
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
 sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, os.path.join(REPO_ROOT, 'eval'))
 from utils.kitti_loader import load_kitti_velodyne
 from utils.nclt_loader import get_nclt_sync_files, load_nclt_pointcloud
 from utils.pcl_filters import voxel_filter, radius_filter, every_n_filter, mahal_filter
+from dataset_loader import load_mulran_dataset, load_mulran_ouster
 
 KITTI_BASE_PATH = os.path.join(REPO_ROOT, 'data', 'KITTI')
 NCLT_BASE_PATH  = os.path.join(REPO_ROOT, 'data', 'NCLT')
@@ -57,6 +59,14 @@ class PreprocessingVisualizer:
             self.scan_files = get_nclt_sync_files(NCLT_BASE_PATH, scene)
             self.total_scans = len(self.scan_files)
             print(f'NCLT / {scene} ({self.total_scans} scans)')
+        elif dataset == 'mulran':
+            scene = scene.upper()
+            self.scene = scene
+            self.scan_files, _, _ = load_mulran_dataset(scene)
+            self.total_scans = len(self.scan_files)
+            print(f'MulRan / {scene} ({self.total_scans} scans)')
+        else:
+            raise ValueError(f'Unknown dataset: {dataset}')
 
         # Filter state (order matches create_and_save_gmm_viral.py pipeline)
         self.every_n_enabled = False
@@ -84,8 +94,10 @@ class PreprocessingVisualizer:
     def _load_pointcloud(self, index):
         if self.dataset == 'kitti':
             points = load_kitti_velodyne(self.scan_files[index])
-        else:  # nclt
+        elif self.dataset == 'nclt':
             points = load_nclt_pointcloud(self.scan_files[index])
+        else: 
+            points = load_mulran_ouster(self.scan_files[index])
         original = len(points)
 
         # Apply filters
@@ -235,10 +247,10 @@ class PreprocessingVisualizer:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Preprocessing setup visualizer for KITTI/NCLT datasets')
-    parser.add_argument('--dataset', type=str, required=True, choices=['kitti', 'nclt'])
+    parser = argparse.ArgumentParser(description='Preprocessing setup visualizer for KITTI/NCLT/MulRan datasets')
+    parser.add_argument('--dataset', type=str, required=True, choices=['kitti', 'nclt', 'mulran'])
     parser.add_argument('--scene', type=str, required=True,
-                        help='Sequence ID: 01/04 for KITTI, 2013-01-10 for NCLT')
+                        help='Sequence ID: 01/04 for KITTI, 2013-01-10 for NCLT, DCC02 for MulRan')
     args = parser.parse_args()
 
     visualizer = PreprocessingVisualizer(args.dataset, args.scene)

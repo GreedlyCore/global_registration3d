@@ -34,12 +34,7 @@ from dataset_loader import (
     load_kitti_dataset, load_kitti_velodyne_pcd,
     load_nclt_dataset,  load_nclt_velodyne_pcd,
 )
-from helpers import extract_fpfh, find_correspondences, pcd2xyz
-
-
-# ------------------------------------------------------------------ #
-# Constants
-# ------------------------------------------------------------------ #
+from helpers import extract_fpfh, find_correspondences, gt_transform, pcd2xyz
 
 # (lo_m, hi_m, hi_inclusive)
 DIST_BINS = [
@@ -49,25 +44,9 @@ DIST_BINS = [
 ]
 BIN_LABELS = ['[2-6m)', '[6-10m)', '[10-12m]']
 
-
-# ------------------------------------------------------------------ #
-# Geometry helpers
-# ------------------------------------------------------------------ #
-
 def in_bin(dist: float, b: int) -> bool:
     lo, hi, inclusive = DIST_BINS[b]
     return lo <= dist <= hi if inclusive else lo <= dist < hi
-
-
-def gt_transform(poses, Tr, src_idx: int, tgt_idx: int) -> np.ndarray:
-    """Ground-truth relative transform src → tgt (velodyne frame)."""
-    Tr_inv = np.linalg.inv(Tr)
-    return Tr_inv @ np.linalg.inv(poses[tgt_idx]) @ poses[src_idx] @ Tr
-
-
-# ------------------------------------------------------------------ #
-# Pair-distance cache
-# ------------------------------------------------------------------ #
 
 def build_or_load_pair_cache(scan_files, poses, Tr, cache_path: str,
                               max_pairs: int, seed: int,
@@ -121,11 +100,6 @@ def build_or_load_pair_cache(scan_files, poses, Tr, cache_path: str,
     logging.info('Pair cache saved → %s', cache_path)
     return bins
 
-
-# ------------------------------------------------------------------ #
-# Feature extraction + correspondences
-# ------------------------------------------------------------------ #
-
 def extract_correspondences(src_pcd, tgt_pcd, voxel_size: float,
                              feat_method: str):
     """
@@ -174,12 +148,6 @@ def extract_correspondences(src_pcd, tgt_pcd, voxel_size: float,
     corr_time = time.time() - t0
 
     return src_corr, tgt_corr, feat_time, corr_time
-
-
-# ------------------------------------------------------------------ #
-# NaN-safe helpers
-# ------------------------------------------------------------------ #
-
 def _fmt(x, ndigits=4):
     """Return rounded float or empty string for NaN."""
     if isinstance(x, float) and math.isnan(x):
@@ -192,11 +160,6 @@ def _fmt(x, ndigits=4):
 def _mean(rows, col):
     vals = [r[col] for r in rows if isinstance(r[col], (int, float))]
     return round(float(np.mean(vals)), 4) if vals else ''
-
-
-# ------------------------------------------------------------------ #
-# Main sweep runner
-# ------------------------------------------------------------------ #
 
 def run_sweep(args):
     dataset = args.dataset.upper()
@@ -212,9 +175,6 @@ def run_sweep(args):
     else:
         raise ValueError(f'Unknown dataset: {dataset}')
 
-    # ---------------------------------------------------------------- #
-    # Pair cache
-    # ---------------------------------------------------------------- #
     cache_path = os.path.join(args.cache_dir,
                               f'pair_cache_{dataset.lower()}_{seq}.json')
     all_bins = build_or_load_pair_cache(
@@ -235,9 +195,6 @@ def run_sweep(args):
                  args.dist_bin, BIN_LABELS[args.dist_bin], len(pairs),
                  args.tcmp, args.dcmp, args.dcmp * args.voxel_size)
 
-    # ---------------------------------------------------------------- #
-    # Output CSV
-    # ---------------------------------------------------------------- #
     os.makedirs(args.out_dir, exist_ok=True)
     tcmp_tag = f'{args.tcmp}'.replace('.', 'p')   # 0.99 → 0p99
     dcmp_tag = f'{args.dcmp}'.replace('.', 'p')
@@ -337,9 +294,6 @@ def run_sweep(args):
             writer.writerow(row)
             rows.append(row)
 
-        # ------------------------------------------------------------- #
-        # SUMMARY row
-        # ------------------------------------------------------------- #
         succ = [r for r in rows if r['success'] == 1]
         sr   = n_success / len(rows) * 100.0 if rows else 0.0
 
@@ -369,11 +323,6 @@ def run_sweep(args):
     logging.info('SR=%.1f%%  (%d/%d)  → %s',
                  sr, n_success, len(rows), csv_path)
     return rows
-
-
-# ------------------------------------------------------------------ #
-# Entry point
-# ------------------------------------------------------------------ #
 
 if __name__ == '__main__':
     # pass-1: grab --config only

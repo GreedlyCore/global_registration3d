@@ -2,18 +2,107 @@ import open3d as o3d
 import numpy as np 
 from scipy.spatial import cKDTree
 
+
+def gt_transform(poses, Tr, src_idx, tgt_idx):
+    """Compute ground-truth relative transform src -> tgt."""
+    Tr_inv = np.linalg.inv(Tr)
+    return Tr_inv @ np.linalg.inv(poses[tgt_idx]) @ poses[src_idx] @ Tr
+
+
+def rotation_angle_deg(R):
+    """Return rotation angle (degrees) from a 3x3 rotation matrix."""
+    cos_angle = np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0)
+    return float(np.degrees(np.arccos(cos_angle)))
+
+
+def resolve_feature_cfg(cfg, feat_name):
+    """Resolve descriptor config with support for shared + per-feature blocks.
+
+    Supported layouts:
+      1) Top-level per-feature blocks (e.g. cfg['FPFH'] = {...})
+      2) Nested descriptor block:
+         cfg['descriptor'] = {
+             'common': {...},
+             'FPFH': {...},
+             'FPFH_PCL': {...},
+             'FasterPFH': {...}
+         }
+      3) Flat descriptor block used as common defaults:
+         cfg['descriptor'] = { ... descriptor keys ... }
+    """
+    merged = {}
+    known_keys = {
+        'normal_radius', 'rnormal',
+        'fpfh_radius', 'rFPFH',
+        'max_nn_normal', 'max_nn_feature',
+        'thr_linearity',
+    }
+
+    descriptor_block = cfg.get('descriptor', {})
+    if isinstance(descriptor_block, dict):
+        if any(k in descriptor_block for k in known_keys):
+            merged.update({k: descriptor_block[k] for k in known_keys if k in descriptor_block})
+
+        common_block = descriptor_block.get('common', {})
+        if isinstance(common_block, dict):
+            merged.update(common_block)
+
+        per_feat = descriptor_block.get(feat_name, {})
+        if isinstance(per_feat, dict):
+            merged.update(per_feat)
+
+    top_level_feat_block = cfg.get(feat_name, {})
+    if isinstance(top_level_feat_block, dict):
+        merged.update(top_level_feat_block)
+
+    # Backward-compatible convenience:
+    # let top-level "FPFH" drive KISS descriptor bindings as well.
+    if feat_name in ('FPFH_PCL', 'FasterPFH') and not top_level_feat_block:
+        fallback_fpfh = cfg.get('FPFH', {})
+        if isinstance(fallback_fpfh, dict):
+            merged.update(fallback_fpfh)
+
+    return merged
+
+
+def resolve_descriptor_params(voxel_size, cfg=None):
+    """Resolve descriptor hyper-parameters with backward-compatible aliases.
+
+    Supported keys:
+        - normal_radius or rnormal
+        - fpfh_radius or rFPFH
+        - max_nn_normal (Open3D FPFH only)
+        - max_nn_feature (Open3D FPFH only)
+        - thr_linearity (FasterPFH only)
+    """
+    if cfg is None:
+        cfg = {}
+
+    base_voxel = float(voxel_size)
+    normal_radius = float(cfg.get('normal_radius', cfg.get('rnormal', base_voxel * 2.0)))
+    fpfh_radius = float(cfg.get('fpfh_radius', cfg.get('rFPFH', base_voxel * 5.0)))
+
+    return {
+        'normal_radius': normal_radius,
+        'fpfh_radius': fpfh_radius,
+        'max_nn_normal': int(cfg.get('max_nn_normal', 30)),
+        'max_nn_feature': int(cfg.get('max_nn_feature', 100)),
+        'thr_linearity': float(cfg.get('thr_linearity', 0.9)),
+    }
+
 def pcd2xyz(pcd):
     return np.asarray(pcd.points).T
 
 def extract_fpfh(pcd, voxel_size):
-  radius_normal = voxel_size * 2
-  pcd.estimate_normals(
-      o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
+    # Keep Open3D FPFH path fixed and unchanged.
+    radius_normal = voxel_size * 2
+    pcd.estimate_normals(
+        o3d.geometry.KDTreeSearchParamHybrid(radius=radius_normal, max_nn=30))
 
-  radius_feature = voxel_size * 5
-  fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-      pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
-  return np.array(fpfh.data).T
+    radius_feature = voxel_size * 5
+    fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+        pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+    return np.array(fpfh.data).T
 
 def find_knn_cpu(feat0, feat1, knn=1, return_distance=False):
   feat1tree = cKDTree(feat1)
