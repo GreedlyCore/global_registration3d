@@ -17,6 +17,14 @@ from helpers import (
     Rt2T,
     pcd2xyz,
 )
+from helpers_graph import (
+    graph_stats_kiss,
+    graph_stats_mac,
+    graph_stats_quatro,
+    graph_stats_quatro_result,
+    graph_stats_teaser,
+    graph_stats_teaser_solver,
+)
 
 
 def _downsample_tbb(pcd, voxel_size):
@@ -73,13 +81,14 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         tgt_pcd           : open3d.geometry.PointCloud  (target)
         voxel_size        : voxel size for downsampling and feature radius
         reg_method        : 'teaser' | 'mac' | 'quatro' | 'kiss'
-        feat_method       : 'FPFH' (open3d) | 'FPFH_PCL' (kiss_matcher PCL binding) | 'FasterPFH'
+        feat_method       : 'FPFH' (o3d) | 'FPFH_PCL' / FasterPFH' (kiss_matcher PCL binding) | 'SHOT_PCL'
         corr_method       : 'nn'  (mutual nearest-neighbor in feature space)
         downsample_method : 'o3d' (open3d voxel_down_sample) | 'tbb_vector' (kiss_matcher TBB)
 
     Returns:
-        T_pred  : (4, 4) numpy float64 — predicted transform src -> tgt
-        timings : dict  keys 'feature', 'correspondence', 'registration' (seconds)
+        T_pred     : (4, 4) numpy float64 — predicted transform src -> tgt
+        timings    : dict  keys 'feature', 'correspondence', 'registration' (seconds)
+        corr_stats : dict  keys 'n_corr_init', 'n_inliers', 'n_outliers'
     """
     timings = {}
 
@@ -88,16 +97,51 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         import kiss_matcher
         src_np = np.asarray(src_pcd.points).astype(np.float64)
         tgt_np = np.asarray(tgt_pcd.points).astype(np.float64)
+
+        def _safe_kiss_time(getter_name, fallback=0.0):
+            getter = getattr(matcher, getter_name, None)
+            if getter is None:
+                return float(fallback)
+            try:
+                v = float(getter())
+            except Exception:
+                return float(fallback)
+            return v if v >= 0.0 else float(fallback)
+
         t0 = time.time()
         params = kiss_matcher.KISSMatcherConfig(voxel_size)
         matcher = kiss_matcher.KISSMatcher(params)
         result = matcher.estimate(src_np, tgt_np)
-        timings['registration'] = time.time() - t0
-        timings['downsample'] = 0.0
-        timings['feature'] = 0.0
-        timings['correspondence'] = 0.0
+
+        wall_t = time.time() - t0
+        timings['downsample'] = _safe_kiss_time('get_processing_time', fallback=0.0)
+        timings['feature'] = _safe_kiss_time('get_extraction_time', fallback=0.0)
+        # KISS internally has:
+        # 1) descriptor matching (NN search),
+        # 2) ROBIN outlier pruning,
+        # 3) final robust solve.
+        #
+        # For parity with other methods in this repo, we treat (2)+(3) as
+        # "registration" and keep only (1) as "correspondence".
+        # This avoids misleading near-zero reg_time_s values for KISS.
+        timings['correspondence'] = _safe_kiss_time('get_matching_time', fallback=0.0)
+        timings['registration'] = (
+            _safe_kiss_time('get_rejection_time', fallback=0.0)
+            + _safe_kiss_time('get_solver_time', fallback=0.0)
+        )
+
+        # If timing getters are unavailable (older wheel), preserve prior behavior.
+        if (
+            timings['downsample'] == 0.0
+            and timings['feature'] == 0.0
+            and timings['correspondence'] == 0.0
+            and timings['registration'] == 0.0
+        ):
+            timings['registration'] = wall_t
+
         T_pred = Rt2T(np.array(result.rotation), np.array(result.translation))
-        return T_pred, timings
+        corr_stats = graph_stats_kiss(matcher)
+        return T_pred, timings, corr_stats
 
     # Downsample
     t0 = time.time()
@@ -133,11 +177,20 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
             np.asarray(tgt_ds.points).astype(np.float32))
         src_xyz = src_xyz.T   # (3, N)
         tgt_xyz = tgt_xyz.T   # (3, N)
+    elif feat_method == 'SHOT_PCL':
+        from kiss_matcher._kiss_matcher import SHOT
+        extractor = SHOT(
+            normal_radius=feat_params['normal_radius'],
+            shot_radius=feat_params['shot_radius'],
+            n_threads=feat_params['shot_threads'],
+        )
+        src_xyz, src_feats = extractor.compute(
+            np.asarray(src_ds.points).astype(np.float32))
+        tgt_xyz, tgt_feats = extractor.compute(
+            np.asarray(tgt_ds.points).astype(np.float32))
+        src_xyz = src_xyz.T   # (3, M)
+        tgt_xyz = tgt_xyz.T   # (3, M)
     else:  # FPFH via open3d
-        # src_xyz = pcd2xyz(src_ds)   # (3, N)
-        # tgt_xyz = pcd2xyz(tgt_ds)
-        # src_feats = extract_fpfh(src_ds, voxel_size)   # (N, 33)
-        # tgt_feats = extract_fpfh(tgt_ds, voxel_size)
         src_xyz = pcd2xyz(src_ds)   # (3, N)
         tgt_xyz = pcd2xyz(tgt_ds)
         src_feats = extract_fpfh(src_ds, voxel_size)   # (N, 33)
@@ -159,6 +212,10 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         solver.solve(src_corr, tgt_corr)
         sol = solver.getSolution()
         T_pred = Rt2T(sol.rotation, sol.translation)
+        corr_stats = graph_stats_teaser_solver(solver, src_corr.shape[1])
+        if corr_stats is None:
+            corr_stats = graph_stats_teaser(
+                src_corr.T, tgt_corr.T, T_pred, inlier_thresh=voxel_size)
     elif reg_method == 'mac':
         import mac_solver
         mac_kwargs = get_mac_solver_params(noise_bound=voxel_size, cfg=mac_cfg)
@@ -168,20 +225,36 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
             tgt_corr.T.astype(np.float32),
             **mac_kwargs,
         )
+        corr_stats = graph_stats_mac(
+            src_corr.T, tgt_corr.T, T_pred, inlier_thresh=mac_kwargs['inlier_thresh'])
     elif reg_method == 'quatro':
         quatro_solver = _import_quatro_solver()
         quatro_kwargs = get_quatro_solver_params(noise_bound=voxel_size, cfg=quatro_cfg)
-        # quatro_solve expects Kx3 float64 arrays.
-        T_pred = np.asarray(
-            quatro_solver.quatro_solve(
-                src_corr.T.astype(np.float64),
-                tgt_corr.T.astype(np.float64),
+        src_corr64 = src_corr.T.astype(np.float64)
+        tgt_corr64 = tgt_corr.T.astype(np.float64)
+        solve_with_stats = getattr(quatro_solver, 'quatro_solve_with_stats', None)
+        if solve_with_stats is not None:
+            result = solve_with_stats(
+                src_corr64,
+                tgt_corr64,
                 **quatro_kwargs,
-            ),
-            dtype=np.float64,
-        )
+            )
+            T_pred = np.asarray(result['transform'], dtype=np.float64)
+            corr_stats = graph_stats_quatro_result(result)
+        else:
+            # quatro_solve expects Kx3 float64 arrays.
+            T_pred = np.asarray(
+                quatro_solver.quatro_solve(
+                    src_corr64,
+                    tgt_corr64,
+                    **quatro_kwargs,
+                ),
+                dtype=np.float64,
+            )
+            corr_stats = graph_stats_quatro(
+                src_corr.T, tgt_corr.T, T_pred, inlier_thresh=quatro_kwargs['noise_bound'])
     else:
         raise ValueError(f"Unknown reg_method: {reg_method}")
     timings['registration'] = time.time() - t0
 
-    return T_pred, timings
+    return T_pred, timings, corr_stats

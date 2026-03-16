@@ -8,6 +8,8 @@ logs/
 utils/
 results/
 eval/__pycache__/*
+visualize/__pycache__/*
+plot/__pycache__/*
 imgui.ini
 
 # your locally installed python env
@@ -18,10 +20,4 @@ MAC/src/build_pybind
 TEASER-plusplus/
 eval/*.so
 
-path1.md
-CLAUDE.md
-TODO.md
-README.md
-read_later.md
-table_plot_ideas.md
-DatasetConsideration.md
+*.md

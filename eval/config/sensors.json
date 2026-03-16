@@ -1,20 +1,20 @@
 {
   "VLP-16": {
-    "id": 1,
+    "dataset": "idk",
     "full_name": "Velodyne VLP-16",
     "voxel_size": 0.1,
     "rnormal": 0.3,
     "rFPFH": 0.45
   },
   "HDL-64E": {
-    "id": 2,
+    "dataset": "kitti",
     "full_name": "Velodyne HDL-64E",
     "voxel_size": 0.3,
     "rnormal": 0.5,
     "rFPFH": 0.65
   },
   "OS1-64": {
-    "id": 3,
+    "dataset": "mulran",
     "full_name": "Ouster OS1-64",
     "voxel_size": 0.6,
     "rnormal": 1.5,

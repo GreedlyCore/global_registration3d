@@ -77,6 +77,24 @@ static py::array_t<double> identity_result()
     return result;
 }
 
+static int count_transform_inliers(const std::vector<Corre_3DMatch>& correspondence,
+                                   const Eigen::Matrix4d& transform,
+                                   double inlier_thresh)
+{
+    const Eigen::Matrix3d R = transform.block<3, 3>(0, 0);
+    const Eigen::Vector3d t = transform.block<3, 1>(0, 3);
+    int n_inliers = 0;
+
+    for (const auto& c : correspondence) {
+        Eigen::Vector3d src(c.src.x, c.src.y, c.src.z);
+        Eigen::Vector3d tgt(c.des.x, c.des.y, c.des.z);
+        const double residual = (R * src + t - tgt).norm();
+        if (residual < inlier_thresh)
+            n_inliers++;
+    }
+    return n_inliers;
+}
+
 // ------------------------------------------------------------------ //
 // Main solver
 // ------------------------------------------------------------------ //
@@ -373,6 +391,9 @@ py::dict mac_solve_verbose(
     auto empty_dict = [&]() -> py::dict {
         py::dict d;
         d["transform"]          = identity_result();
+        d["n_corr_init"]        = 0;
+        d["n_inliers"]          = 0;
+        d["n_outliers"]         = 0;
         d["n_cliques_total"]    = 0;
         d["n_cliques_selected"] = 0;
         d["n_edges"]            = 0;
@@ -743,9 +764,19 @@ py::dict mac_solve_verbose(
         for (int j = 0; j < 4; ++j)
             r(i, j) = best_est(i, j);
 
+    const int n_corr_init = total_num;
+    const int n_inliers = count_transform_inliers(
+        correspondence,
+        best_est,
+        static_cast<double>(inlier_thresh));
+    const int n_outliers = std::max(0, n_corr_init - n_inliers);
+
     // ---- return dict --------------------------------------------- //
     py::dict d;
     d["transform"]          = transform;
+    d["n_corr_init"]        = n_corr_init;
+    d["n_inliers"]          = n_inliers;
+    d["n_outliers"]         = n_outliers;
     d["n_cliques_total"]    = clique_num;
     d["n_cliques_selected"] = n_cliques_selected;
     d["n_edges"]            = n_edges;
@@ -810,6 +841,9 @@ Args:
 Returns:
     dict with keys:
       transform          : (4, 4) float64 — estimated src->tgt transformation
+    n_corr_init        : int   — number of input correspondences
+    n_inliers          : int   — number of geometric inliers under the final transform
+    n_outliers         : int   — n_corr_init - n_inliers
       n_cliques_total    : int   — total maximal cliques found by igraph
       n_cliques_selected : int   — cliques remaining after node-guided selection
       n_edges            : int   — edges in the compatibility graph

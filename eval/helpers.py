@@ -3,6 +3,23 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 
+def _find_correspondences_pybind(feats0, feats1, mutual_filter=True):
+    """ pybindings correspondence search """
+    from kiss_matcher import find_correspondences as _kiss_find_correspondences
+    
+    try:
+        idx0, idx1 = _kiss_find_correspondences(
+            np.ascontiguousarray(feats0, dtype=np.float32),
+            np.ascontiguousarray(feats1, dtype=np.float32),
+            bool(mutual_filter),
+            False,
+            0,
+        )
+        return np.asarray(idx0, dtype=np.int64), np.asarray(idx1, dtype=np.int64)
+    except Exception:
+        return None
+
+
 def gt_transform(poses, Tr, src_idx, tgt_idx):
     """Compute ground-truth relative transform src -> tgt."""
     Tr_inv = np.linalg.inv(Tr)
@@ -34,7 +51,9 @@ def resolve_feature_cfg(cfg, feat_name):
     known_keys = {
         'normal_radius', 'rnormal',
         'fpfh_radius', 'rFPFH',
+        'shot_radius', 'rSHOT',
         'max_nn_normal', 'max_nn_feature',
+        'shot_threads',
         'thr_linearity',
     }
 
@@ -57,7 +76,7 @@ def resolve_feature_cfg(cfg, feat_name):
 
     # Backward-compatible convenience:
     # let top-level "FPFH" drive KISS descriptor bindings as well.
-    if feat_name in ('FPFH_PCL', 'FasterPFH') and not top_level_feat_block:
+    if feat_name in ('FPFH_PCL', 'FasterPFH', 'SHOT_PCL') and not top_level_feat_block:
         fallback_fpfh = cfg.get('FPFH', {})
         if isinstance(fallback_fpfh, dict):
             merged.update(fallback_fpfh)
@@ -71,8 +90,10 @@ def resolve_descriptor_params(voxel_size, cfg=None):
     Supported keys:
         - normal_radius or rnormal
         - fpfh_radius or rFPFH
+        - shot_radius or rSHOT
         - max_nn_normal (Open3D FPFH only)
         - max_nn_feature (Open3D FPFH only)
+        - shot_threads (SHOT_PCL only, 0 means PCL default)
         - thr_linearity (FasterPFH only)
     """
     if cfg is None:
@@ -81,12 +102,15 @@ def resolve_descriptor_params(voxel_size, cfg=None):
     base_voxel = float(voxel_size)
     normal_radius = float(cfg.get('normal_radius', cfg.get('rnormal', base_voxel * 2.0)))
     fpfh_radius = float(cfg.get('fpfh_radius', cfg.get('rFPFH', base_voxel * 5.0)))
+    shot_radius = float(cfg.get('shot_radius', cfg.get('rSHOT', fpfh_radius)))
 
     return {
         'normal_radius': normal_radius,
         'fpfh_radius': fpfh_radius,
+        'shot_radius': shot_radius,
         'max_nn_normal': int(cfg.get('max_nn_normal', 30)),
         'max_nn_feature': int(cfg.get('max_nn_feature', 100)),
+        'shot_threads': int(cfg.get('shot_threads', 0)),
         'thr_linearity': float(cfg.get('thr_linearity', 0.9)),
     }
 
@@ -105,7 +129,8 @@ def extract_fpfh(pcd, voxel_size):
     return np.array(fpfh.data).T
 
 def find_knn_cpu(feat0, feat1, knn=1, return_distance=False):
-  feat1tree = cKDTree(feat1)
+#   feat1tree = cKDTree(feat1, compact_nodes=False, balanced_tree=False)
+  feat1tree = cKDTree(feat1, compact_nodes=False, balanced_tree=False)
   dists, nn_inds = feat1tree.query(feat0, k=knn, workers=-1)
   if return_distance:
     return nn_inds, dists
@@ -113,22 +138,26 @@ def find_knn_cpu(feat0, feat1, knn=1, return_distance=False):
     return nn_inds
 
 def find_correspondences(feats0, feats1, mutual_filter=True):
-  nns01 = find_knn_cpu(feats0, feats1, knn=1, return_distance=False)
-  corres01_idx0 = np.arange(len(nns01))
-  corres01_idx1 = nns01
+    # pybind_match = _find_correspondences_pybind(feats0, feats1, mutual_filter=mutual_filter)
+    # if pybind_match is not None:
+        # return pybind_match
 
-  if not mutual_filter:
-    return corres01_idx0, corres01_idx1
+    nns01 = find_knn_cpu(feats0, feats1, knn=1, return_distance=False)
+    corres01_idx0 = np.arange(len(nns01))
+    corres01_idx1 = nns01
 
-  nns10 = find_knn_cpu(feats1, feats0, knn=1, return_distance=False)
-  corres10_idx1 = np.arange(len(nns10))
-  corres10_idx0 = nns10
+    if not mutual_filter:
+        return corres01_idx0, corres01_idx1
 
-  mutual_filter = (corres10_idx0[corres01_idx1] == corres01_idx0)
-  corres_idx0 = corres01_idx0[mutual_filter]
-  corres_idx1 = corres01_idx1[mutual_filter]
+    nns10 = find_knn_cpu(feats1, feats0, knn=1, return_distance=False)
+    corres10_idx1 = np.arange(len(nns10))
+    corres10_idx0 = nns10
 
-  return corres_idx0, corres_idx1
+    mutual_filter = (corres10_idx0[corres01_idx1] == corres01_idx0)
+    corres_idx0 = corres01_idx0[mutual_filter]
+    corres_idx1 = corres01_idx1[mutual_filter]
+
+    return corres_idx0, corres_idx1
 
 def get_teaser_solver(noise_bound, cfg=None):
     """Build a TEASER++ solver.

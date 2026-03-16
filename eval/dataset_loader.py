@@ -7,7 +7,7 @@ import numpy as np
 import open3d as o3d
 import scipy.interpolate
 
-# TODO: SETUP this according your datasets destination folder or create symlinks
+# TODO: SETUP this according your datasets destination folder OR just create a symlinks
 KITTI_DIR = os.path.expanduser("~/thesis/global_registration3d/data/KITTI")
 NCLT_DIR  = os.path.expanduser("~/thesis/global_registration3d/data/NCLT")
 MULRAN_DIR = os.path.expanduser("~/thesis/global_registration3d/data/MulRan")
