@@ -7,8 +7,6 @@
     "test_count": 100,
     "feat": "FasterPFH",
     "reg": "quatro",
-    "re_thre": 10.0,
-    "te_thre": 2.0,
     "out_dir": "results",
     "seed": 42,
     "teaser": {

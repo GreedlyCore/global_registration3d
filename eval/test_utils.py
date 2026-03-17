@@ -15,7 +15,7 @@ from helpers import gt_transform
 class Metrics:
     """Evaluation metrics for pose estimation."""
 
-    def __init__(self, re_threshold: float = 10.0, te_threshold: float = 2.0) -> None:
+    def __init__(self, re_threshold: float = 5.0, te_threshold: float = 2.0) -> None:
         """
         Args:
             re_threshold: rotation error threshold in degrees
@@ -25,12 +25,19 @@ class Metrics:
         self.te_threshold = te_threshold
 
     def rotation_error(self, R_pred: np.ndarray, R_gt: np.ndarray) -> float:
-        """Compute Rotation Error (RRE) in degrees."""
-        cos_angle = np.clip((np.trace(R_pred.T @ R_gt) - 1.0) / 2.0, -1.0, 1.0)
+        """
+        Compute Rotation Error (RRE) in degrees
+        Explanation of arccos formula ...
+        https://en.wikipedia.org/wiki/Rotation_matrix#Determining_the_angle
+        https://math.stackexchange.com/questions/3510272/why-should-the-trace-of-a-3d-rotation-matrix-have-these-properties#3510284
+        """
+        cos_angle = np.clip( (np.trace(R_pred.T @ R_gt) - 1.0) / 2.0, -1.0, 1.0 )
         return float(np.degrees(np.arccos(cos_angle)))
 
     def translation_error(self, t_pred: np.ndarray, t_gt: np.ndarray) -> float:
-        """Compute Translation Error (RTE) as L2 norm in meters."""
+        """Compute per-pair translation error as L2 norm in meters."""
+        # sqrt or not? TODO:
+        # \[ \text{RTE} = {\sum_{n=1}^{N_{\text{success}}} (t_{n,\text{GT}} - \hat{t}_n)^2 / N_{\text{success}}}, \]
         return float(np.linalg.norm(t_pred.ravel() - t_gt.ravel()))
 
     def is_success(self, re: float, te: float) -> int:
@@ -46,9 +53,9 @@ class Metrics:
         sr = n_success / len(rows) * 100 if rows else 0.0
 
         mean_rre = float(np.mean([r['RE_deg'] for r in successful])) if successful else float('nan')
-        mean_rte = float(np.mean([r['TE_m'] for r in successful])) if successful else float('nan')
+        mean_rte = float(np.mean([r['TE_m'] ** 2 for r in successful])) if successful else float('nan')
         fail_rre = float(np.mean([r['RE_deg'] for r in failed])) if failed else float('nan')
-        fail_rte = float(np.mean([r['TE_m'] for r in failed])) if failed else float('nan')
+        fail_rte = float(np.mean([r['TE_m'] ** 2 for r in failed])) if failed else float('nan')
         mean_time = float(np.mean([r['total_time_s'] for r in rows])) if rows else float('nan')
         mean_gt_dist = float(np.mean([r['gt_dist_m'] for r in rows])) if rows else float('nan')
 

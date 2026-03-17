@@ -58,8 +58,6 @@
     "feat": "FasterPFH",
     "reg": "teaser",
     "voxel_size": 0.5,
-    "re_thre": 10.0,
-    "te_thre": 2.0,
     "out_dir": "results",
     "seed": 42,
     "teaser": {
