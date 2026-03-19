@@ -125,7 +125,7 @@ def plot_feat_research(input_csv: str, output_png: str, title: str = '') -> str:
         draw_heatmap(
             ax=axes[0, col],
             data=sr_data[col],
-            title=f'nu = {nu:.1f} m',
+            title=f'$\\nu$ = {nu:.1f} m',
             vmin=0,
             vmax=100,
             cbar_label='Success rate [%]',
@@ -141,7 +141,7 @@ def plot_feat_research(input_csv: str, output_png: str, title: str = '') -> str:
         draw_heatmap(
             ax=axes[1, col],
             data=tm_data[col],
-            title=f'nu = {nu:.1f} m',
+            title=f'$\\nu$ = {nu:.1f} m',
             vmin=tm_min,
             vmax=tm_max,
             cbar_label='Time [s]',

@@ -1,11 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-BASE_OUT=${BASE_OUT:-results/feat_research/$(date +%H-%M-%S)}
+cd "$REPO_ROOT"
+
+if [[ -z "${VIRTUAL_ENV:-}" && -f "$PWD/.venv2/bin/activate" ]]; then
+  source "$PWD/.venv2/bin/activate"
+fi
+
+if [[ "${EUID}" -eq 0 ]]; then
+  echo "[error] Do not run this script with sudo." >&2
+  echo "[hint] Run: bash eval/scripts/sweep_reg_methods.sh" >&2
+  exit 1
+fi
+
+PYTHON_BIN=${PYTHON_BIN:-"$PWD/.venv2/bin/python3"}
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "[error] Python executable not found: $PYTHON_BIN" >&2
+  echo "[hint] Create/activate venv first or set PYTHON_BIN." >&2
+  exit 1
+fi
+
+BASE_OUT=${BASE_OUT:-results/feat_research/$(date +%H-%M-%S.%N | sed 's/[0-9]\{6\}$//')}
 TEST_COUNT=${TEST_COUNT:-5}
 SEED=${SEED:-42}
+
+if ! mkdir -p "$BASE_OUT" 2>/dev/null; then
+  FALLBACK_OUT="results/feat_research_user/$(date +%H-%M-%S.%N | sed 's/[0-9]\{6\}$//')"
+  echo "[warn] BASE_OUT is not writable: $BASE_OUT" >&2
+  echo "[warn] Falling back to: $FALLBACK_OUT" >&2
+  BASE_OUT="$FALLBACK_OUT"
+  mkdir -p "$BASE_OUT"
+fi
 
 KITTI_CONFIG=${KITTI_CONFIG:-eval/config/KITTI.json}
 MULRAN_CONFIG=${MULRAN_CONFIG:-eval/config/MulRan.json}
@@ -17,23 +45,62 @@ for cfg in "$KITTI_CONFIG" "$MULRAN_CONFIG"; do
   fi
 done
 
-# 4 * 2 * 3 * 5 * 5 * 2 * 3 = 7200 runs in full version ... careful!
-# METHODS=(mac teaser quatro kiss)
-# FEATS=(FasterPFH FPFH SHOT_PCL)
-# VOXELS=(0.1 0.3 0.5)
+
+
+METHODS=(mac teaser quatro kiss)
+# METHODS=(mac)
+# METHODS=(kiss)
+
+# FEATS=(FasterPFH)
+FEATS=(FasterPFH FPFH)
+
+# FEATS=(SHOT_PCL)
+
+# VOXELS=(0.1 0.3 0.5 0.7)
 # ALPHAS=(2.0 2.5 3.0 3.5 4.0)
 # BETAS=(4.0 5.0 6.0 7.0 8.0)
 
-# KITTI_SEQS=(01 04)
-# MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
+# VOXELS=(0.1 0.3 0.5 0.7)
+VOXELS=(0.3 0.5 0.7) # for speed up, too few points in case of 
+# VOXELS=(0.7) # for speed speed up
+ALPHA_MULTI=${ALPHA_MULTI:-3.5} # 2 // 3.5
+BETA_MULTI=${BETA_MULTI:-5.0}  # 5 // 5
+
+ALPHAS=()
+BETAS=()
+
+for v in "${VOXELS[@]}"; do
+    alpha=$(echo "$v * $ALPHA_MULTI" | bc -l)
+    beta=$(echo "$v * $BETA_MULTI" | bc -l)
+    ALPHAS+=("$alpha")
+    BETAS+=("$beta")
+done
+
+# Format with 2 decimal places for nicer output
+# echo "Configuration:"
+# echo "  Alpha multiplier: $ALPHA_MULTI"
+# echo "  Beta multiplier:  $BETA_MULTI"
+# echo
+# echo "Results:"
+# for i in "${!VOXELS[@]}"; do
+#     printf "voxel=%.1f → alpha=%.2f, beta=%.2f\n" \
+#            "${VOXELS[$i]}" "${ALPHAS[$i]}" "${BETAS[$i]}"
+# done
+
+
+KITTI_SEQS=(01 02 03 04 05 06 07 08 09 10)
+MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
+# OXFORD_SEQS = () # TODO
+# VIRAL_SEQS = () # TODO
+# NCLT -- ? think twice
 
 
 # 1 * 1 * 4 * 5 * 5 * 2 * 3 = 600 runs 
-METHODS=(quatro)
-FEATS=(FasterPFH)
-VOXELS=(0.1 0.3 0.5 0.7)
-ALPHAS=(2.0 2.5 3.0 3.5 4.0)
-BETAS=(4.0 5.0 6.0 7.0 8.0)
+# METHODS=(quatro)
+# FEATS=(FasterPFH)
+# VOXELS=(0.1 0.3 0.5 0.7)
+# ALPHAS=(2.0 2.5 3.0 3.5 4.0)
+# BETAS=(4.0 5.0 6.0 7.0 8.0)
 # ALPHAS=(2.0 2.5 )
 # BETAS=(4.0 5.0 )
 # KITTI_SEQS=( )
@@ -41,8 +108,8 @@ BETAS=(4.0 5.0 6.0 7.0 8.0)
 
 # N = N_{fail} + N_{succ} 
 # N = TEST_COUNT * ( len(KITTI_SEQS) + len(MULRAN_SEQS) )
-KITTI_SEQS=(01 04)
-MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
+# KITTI_SEQS=(01 04)
+# MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
 
 # Doing a single GT bin 
 DIST_MINS=(10)
@@ -111,7 +178,7 @@ run_one() {
 
   echo "--- dataset=$dataset scene=$scene method=$method feat=$feat dist=[$dmin,$dmax] voxel=$voxel alpha=$alpha beta=$beta ---"
 
-  python3 eval/test.py \
+  "$PYTHON_BIN" eval/test.py \
     --config "$base_cfg" \
     --dataset "$dataset" \
     --seq "$scene" \
@@ -182,7 +249,7 @@ for method in "${METHODS[@]}"; do
   done
 done
 
-python3 "$(dirname "$0")/aggregate_detail.py" "$DETAIL_CSV" "$OVERALL_DIR"
+"$PYTHON_BIN" "$SCRIPT_DIR/aggregate_detail.py" "$DETAIL_CSV" "$OVERALL_DIR"
 
 echo
 echo "[done] detailed: $DETAIL_CSV"

@@ -8,6 +8,11 @@ Usage:
 
 The detail CSV must have at least these columns:
     method, feat, voxel_size, alpha, beta, rnormal, rFPFH, sr_percent, time_s
+
+
+
+python3 eval/scripts/aggregate_detail.py results/feat_research_user/15-07-29/overall_detail.csv results/feat_research_user/15-07-29/overall
+    
 """
 import csv
 import math

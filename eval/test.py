@@ -158,11 +158,11 @@ def eval_sequence(args, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         f"[{dataset}] Seq {seq} | {mode_info} | {args.feat}+{args.reg} | N={len(rows)}")
     logging.info(
         f"  SR = {summary_stats['sr_percent']:.2f}%  ({summary_stats['n_success']}/{summary_stats['n_total']})  |  "
-        f"Mean RRE = {summary_stats['mean_rre']:.2f} deg  |  Mean RTE = {summary_stats['mean_rte']:.4f} m^2  |  "
+        f"Mean RRE = {summary_stats['mean_rre']:.2f} deg  |  Mean RTE = {summary_stats['mean_rte']:.4f} m  |  "
         f"Mean GT dist = {summary_stats['mean_gt_dist']:.2f} m")
     logging.info(
         f"  Failed ({summary_stats['n_failed']})  |  "
-        f"Mean RRE = {summary_stats['fail_rre']:.2f} deg  |  Mean RTE = {summary_stats['fail_rte']:.4f} m^2")
+        f"Mean RRE = {summary_stats['fail_rre']:.2f} deg  |  Mean RTE = {summary_stats['fail_rte']:.4f} m")
     if ENABLE_CSV_OUTPUT:
         logging.info(f"  Results -> {csv_path}")
     else:

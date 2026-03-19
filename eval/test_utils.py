@@ -9,6 +9,7 @@ from dataset_loader import (
     load_kitti_dataset, load_kitti_velodyne_pcd,
     load_nclt_dataset, load_nclt_velodyne_pcd,
     load_mulran_dataset, load_mulran_ouster_pcd,
+    load_oxford_dataset, load_oxford_lidar_pcd,
 )
 from helpers import gt_transform
 
@@ -36,8 +37,6 @@ class Metrics:
 
     def translation_error(self, t_pred: np.ndarray, t_gt: np.ndarray) -> float:
         """Compute per-pair translation error as L2 norm in meters."""
-        # sqrt or not? TODO:
-        # \[ \text{RTE} = {\sum_{n=1}^{N_{\text{success}}} (t_{n,\text{GT}} - \hat{t}_n)^2 / N_{\text{success}}}, \]
         return float(np.linalg.norm(t_pred.ravel() - t_gt.ravel()))
 
     def is_success(self, re: float, te: float) -> int:
@@ -53,9 +52,9 @@ class Metrics:
         sr = n_success / len(rows) * 100 if rows else 0.0
 
         mean_rre = float(np.mean([r['RE_deg'] for r in successful])) if successful else float('nan')
-        mean_rte = float(np.mean([r['TE_m'] ** 2 for r in successful])) if successful else float('nan')
+        mean_rte = float(np.mean([r['TE_m'] for r in successful])) if successful else float('nan')
         fail_rre = float(np.mean([r['RE_deg'] for r in failed])) if failed else float('nan')
-        fail_rte = float(np.mean([r['TE_m'] ** 2 for r in failed])) if failed else float('nan')
+        fail_rte = float(np.mean([r['TE_m'] for r in failed])) if failed else float('nan')
         mean_time = float(np.mean([r['total_time_s'] for r in rows])) if rows else float('nan')
         mean_gt_dist = float(np.mean([r['gt_dist_m'] for r in rows])) if rows else float('nan')
 
@@ -78,9 +77,7 @@ def load_dataset_loader(dataset: str, seq: str) -> Tuple[List[str], np.ndarray, 
     Load dataset and return scan files, poses, transformation matrix, loader function.
     
     Args:
-        dataset: 'KITTI', 'NCLT', or 'MULRAN'
-        seq: sequence ID (e.g., '01' for KITTI, '2012-11-17' for NCLT, 'DCC02' for MulRan)
-    
+           dataset: 'KITTI', 'NCLT', 'MULRAN', or 'OXFORD'
     Returns:
         (scan_files, poses, Tr, load_pcd_fn, normalized_seq)
     """
@@ -97,6 +94,9 @@ def load_dataset_loader(dataset: str, seq: str) -> Tuple[List[str], np.ndarray, 
         seq = seq.upper()
         scan_files, poses, Tr = load_mulran_dataset(seq)
         load_pcd = load_mulran_ouster_pcd
+    elif dataset == 'OXFORD':
+        scan_files, poses, Tr = load_oxford_dataset(seq)
+        load_pcd = load_oxford_lidar_pcd
     else:
         raise ValueError(f'Unknown dataset: {dataset}')
     

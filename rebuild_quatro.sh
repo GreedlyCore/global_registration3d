@@ -15,8 +15,8 @@ if ! command -v colcon >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! -f "/opt/ros/kilted/setup.bash" ]]; then
-  echo "[error] ROS setup not found at /opt/ros/kilted/setup.bash"
+if [[ ! -f "/opt/ros/jazzy/setup.bash" ]]; then
+  echo "[error] ROS setup not found at /opt/ros/jazzy/setup.bash"
   exit 1
 fi
 
@@ -33,7 +33,7 @@ cd "$QUATRO_DIR"
 export PATH=/usr/bin:$PATH
 # ROS setup scripts may reference unset variables; temporarily relax nounset.
 set +u
-source /opt/ros/kilted/setup.bash
+source /opt/ros/jazzy/setup.bash
 set -u
 
 colcon build --cmake-args \

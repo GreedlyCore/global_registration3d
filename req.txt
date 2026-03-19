@@ -3,3 +3,5 @@ open3d==0.19.0
 scikit-learn==1.6.1
 scipy==1.15.3
 catkin_pkg
+tqdm
+gdown

@@ -30,8 +30,8 @@ def draw_heatmap(ax, data, title, vmin, vmax, cbar_label, fmt,
   ax.set_xticklabels(beta_vals)
   ax.set_yticklabels(alpha_vals)
 
-  ax.set_xlabel("Ratio of FPFH radius to nu")
-  ax.set_ylabel("Ratio of normal radius to nu")
+  ax.set_xlabel("Ratio of FPFH radius to $\\nu$")
+  ax.set_ylabel("Ratio of normal radius to $\\nu$")
 
   # Annotate cells.
   for i in range(data.shape[0]):

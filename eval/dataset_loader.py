@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Datasets (KITTI/NCLT/MulRan) loading utilities.
+Datasets (KITTI/NCLT/MulRan/OXFORD) loading utilities.
 """
 import os
 import numpy as np
@@ -11,6 +11,7 @@ import scipy.interpolate
 KITTI_DIR = os.path.expanduser("~/thesis/global_registration3d/data/KITTI")
 NCLT_DIR  = os.path.expanduser("~/thesis/global_registration3d/data/NCLT")
 MULRAN_DIR = os.path.expanduser("~/thesis/global_registration3d/data/MulRan")
+OXFORD_DIR = os.path.expanduser("~/thesis/global_registration3d/data/OXFORD")
 
 def load_kitti_velodyne(filepath):
     """
@@ -368,4 +369,212 @@ def load_mulran_dataset(seq):
     to the Ouster sensor frame.
     """
     poses, scan_files = load_mulran_ground_truth(seq, MULRAN_DIR)
+    return scan_files, poses, np.eye(4)
+
+
+def load_oxford_lidar(filepath):
+    """
+    Load one Oxford lidar-clouds/*.pcd scan.
+
+    Returns:
+        Nx3 float32 array (x, y, z)
+    """
+    pcd = o3d.io.read_point_cloud(filepath)
+    return np.asarray(pcd.points, dtype=np.float32)
+
+
+def load_oxford_lidar_pcd(filepath):
+    """Load one Oxford lidar-clouds/*.pcd scan as an open3d PointCloud."""
+    return o3d.io.read_point_cloud(filepath)
+
+
+def _oxford_base_to_lidar_transform():
+    """
+    Static tf: Oxford base frame -> lidar frame.
+    [tx, ty, tz, qx, qy, qz, qw]
+    """
+    tx, ty, tz = 0.0, 0.0, 0.124
+    qx, qy, qz, qw = 0.0, 0.0, 1.0, 0.0
+
+    T = np.eye(4)
+    T[:3, :3] = _quat_xyzw_to_rot(qx, qy, qz, qw)
+    T[:3, 3] = [tx, ty, tz]
+    return T
+
+
+def _quat_xyzw_to_rot(qx, qy, qz, qw):
+    """Quaternion (x, y, z, w) to 3x3 rotation matrix."""
+    q = np.array([qx, qy, qz, qw], dtype=np.float64)
+    n = np.linalg.norm(q)
+    if n < 1e-12:
+        raise ValueError('Invalid zero-norm quaternion')
+    qx, qy, qz, qw = q / n
+
+    xx, yy, zz = qx * qx, qy * qy, qz * qz
+    xy, xz, yz = qx * qy, qx * qz, qy * qz
+    wx, wy, wz = qw * qx, qw * qy, qw * qz
+
+    return np.array([
+        [1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz),       2.0 * (xz + wy)],
+        [2.0 * (xy + wz),       1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx)],
+        [2.0 * (xz - wy),       2.0 * (yz + wx),       1.0 - 2.0 * (xx + yy)],
+    ], dtype=np.float64)
+
+
+def _parse_oxford_timestamp_ns(ts_text):
+    """Parse timestamp text like '1710929213.593122000' into int nanoseconds."""
+    ts_text = ts_text.strip()
+    if '.' in ts_text:
+        sec_str, frac_str = ts_text.split('.', 1)
+        frac_digits = ''.join(ch for ch in frac_str if ch.isdigit())
+        frac_digits = (frac_digits + '000000000')[:9]
+    else:
+        sec_str = ts_text
+        frac_digits = '000000000'
+    return int(sec_str) * 1_000_000_000 + int(frac_digits)
+
+
+def _load_oxford_gt_tum(gt_tum_file):
+    """
+    Load Oxford gt-tum.txt (world->base poses).
+
+    Expected columns:
+        timestamp x y z qx qy qz qw
+    """
+    gt_ts = []
+    gt_poses = []
+
+    with open(gt_tum_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+
+            parts = line.split()
+            if len(parts) < 8:
+                raise ValueError(f'Invalid gt-tum row in {gt_tum_file}: {line}')
+
+            ts_ns = _parse_oxford_timestamp_ns(parts[0])
+            x, y, z, qx, qy, qz, qw = map(float, parts[1:8])
+
+            T = np.eye(4)
+            T[:3, :3] = _quat_xyzw_to_rot(qx, qy, qz, qw)
+            T[:3, 3] = [x, y, z]
+
+            gt_ts.append(ts_ns)
+            gt_poses.append(T)
+
+    if not gt_poses:
+        raise RuntimeError(f'No valid poses found in {gt_tum_file}')
+
+    return np.array(gt_ts, dtype=np.int64), gt_poses
+
+
+def _load_oxford_slam_poses(slam_pose_file):
+    """
+    Load Oxford slam-poses.csv (world->base poses).
+
+    Expected columns:
+        counter, sec, nsec, x, y, z, qx, qy, qz, qw
+    """
+    gt_ts = []
+    gt_poses = []
+
+    with open(slam_pose_file, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) < 10:
+                raise ValueError(f'Invalid slam-poses row in {slam_pose_file}: {line}')
+
+            sec = int(parts[1])
+            nsec = int(parts[2])
+            ts_ns = sec * 1_000_000_000 + nsec
+
+            x, y, z, qx, qy, qz, qw = map(float, parts[3:10])
+
+            T = np.eye(4)
+            T[:3, :3] = _quat_xyzw_to_rot(qx, qy, qz, qw)
+            T[:3, 3] = [x, y, z]
+
+            gt_ts.append(ts_ns)
+            gt_poses.append(T)
+
+    if not gt_poses:
+        raise RuntimeError(f'No valid poses found in {slam_pose_file}')
+
+    return np.array(gt_ts, dtype=np.int64), gt_poses
+
+
+def load_oxford_ground_truth(seq, oxford_dir):
+    """
+    Load Oxford GT poses, one per lidar-clouds scan.
+
+    Supported GT files in sequence root:
+      - gt-tum.txt
+      - slam-poses.csv
+
+    Poses are matched to scan timestamps by nearest timestamp and then
+    converted from world->base to world->lidar using T_base_lidar.
+
+    Args:
+        seq: sequence name, e.g. '2024-03-18-christ-church-01'
+        oxford_dir: root Oxford dir containing '<seq>/'
+
+    Returns:
+        poses: list of 4x4 world->lidar transforms
+        scan_files: list of .pcd paths sorted by timestamp
+    """
+    seq_dir = os.path.join(os.path.expanduser(oxford_dir), seq)
+    lidar_dir = os.path.join(seq_dir, 'lidar-clouds')
+    gt_tum_file = os.path.join(seq_dir, 'gt-tum.txt')
+    slam_pose_file = os.path.join(seq_dir, 'slam-poses.csv')
+
+    if not os.path.isdir(seq_dir):
+        raise FileNotFoundError(f'Oxford sequence dir not found: {seq_dir}')
+    if not os.path.isdir(lidar_dir):
+        raise FileNotFoundError(f'lidar-clouds dir not found: {lidar_dir}')
+
+    scan_files = sorted(
+        [os.path.join(lidar_dir, f) for f in os.listdir(lidar_dir) if f.endswith('.pcd')]
+    )
+    if len(scan_files) == 0:
+        raise RuntimeError(f'No Oxford .pcd scans found for seq {seq}')
+
+    scan_ts = np.array([
+        _parse_oxford_timestamp_ns(os.path.splitext(os.path.basename(f))[0])
+        for f in scan_files
+    ], dtype=np.int64)
+
+    if os.path.exists(gt_tum_file):
+        gt_ts, gt_poses = _load_oxford_gt_tum(gt_tum_file)
+    elif os.path.exists(slam_pose_file):
+        gt_ts, gt_poses = _load_oxford_slam_poses(slam_pose_file)
+    else:
+        raise FileNotFoundError(
+            f'Neither gt-tum.txt nor slam-poses.csv found in: {seq_dir}')
+
+    T_base_lidar = _oxford_base_to_lidar_transform()
+
+    poses = []
+    gt_ts_arr = np.asarray(gt_ts, dtype=np.int64)
+    for ts in scan_ts:
+        nearest_idx = int(np.argmin(np.abs(gt_ts_arr - ts)))
+        poses.append(gt_poses[nearest_idx] @ T_base_lidar)
+
+    print(f'Loaded {len(poses)} OXFORD poses for seq {seq}')
+    return poses, scan_files
+
+
+def load_oxford_dataset(seq):
+    """
+    High-level loader for an Oxford sequence.
+
+    Returns (scan_files, poses, eye(4)) — Tr=eye(4) because poses are provided
+    in the lidar sensor frame.
+    """
+    poses, scan_files = load_oxford_ground_truth(seq, OXFORD_DIR)
     return scan_files, poses, np.eye(4)

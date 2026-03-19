@@ -26,7 +26,6 @@ from helpers_graph import (
     graph_stats_teaser_solver,
 )
 
-
 def _downsample_tbb(pcd, voxel_size):
     """Downsample an open3d PointCloud using kiss_matcher TBB VoxelgridSampling."""
     from kiss_matcher._kiss_matcher import voxelgrid_sampling

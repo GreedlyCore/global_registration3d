@@ -2,9 +2,10 @@
 .claude
 
 # could be dataset data or symlinks that refers to it
-data/
+data
 
 logs/
+adaptive/build
 utils/
 results/
 eval/__pycache__/*
