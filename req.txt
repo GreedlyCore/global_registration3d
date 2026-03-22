@@ -5,3 +5,4 @@ scipy==1.15.3
 catkin_pkg
 tqdm
 gdown
+pyridescence

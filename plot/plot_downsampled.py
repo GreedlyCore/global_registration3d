@@ -40,6 +40,8 @@ try:  # noqa: E402
         load_kitti_velodyne_pcd,
         load_mulran_dataset,
         load_mulran_ouster_pcd,
+        load_oxford_lidar_pcd,
+        load_oxford_dataset,
     )
     from eval.reg_pipe import _downsample_tbb
 except ImportError:  # noqa: E402
@@ -48,22 +50,26 @@ except ImportError:  # noqa: E402
     load_kitti_velodyne_pcd = _dataset_loader.load_kitti_velodyne_pcd
     load_mulran_dataset = _dataset_loader.load_mulran_dataset
     load_mulran_ouster_pcd = _dataset_loader.load_mulran_ouster_pcd
+    load_oxford_lidar_pcd = _dataset_loader.load_oxford_lidar_pcd
     _reg_pipe = importlib.import_module('reg_pipe')
     _downsample_tbb = _reg_pipe._downsample_tbb
 
 
 VOXEL_SIZES = np.array([0.05, 0.10, 0.25, 0.50], dtype=float)
 DEFAULT_SCENES: Dict[str, List[str]] = {
+    'OXFORD': ['2024-03-18-christ-church-01', '2024-03-18-christ-church-02', '2024-03-20-christ-church-06'],
     'KITTI': ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'],
     'MulRan': ['DCC02', 'RIVERSIDE02', 'KAIST02'],
 }
 DATASET_DISPLAY = {
     'KITTI': 'KITTI',
     'MulRan': 'MulRan',
+    'OXFORD': 'Oxford',
 }
 DATASET_STYLE = {
     'KITTI': {'color': '#1f77b4', 'marker': 'D'},
     'MulRan': {'color': '#2ca02c', 'marker': '^'},
+    'OXFORD': {'color': '#d62728', 'marker': 's'},
 }
 
 
@@ -79,6 +85,9 @@ def _load_scan_files(dataset: str, scene: str) -> List[str]:
     if dataset == 'MulRan':
         scan_files, _, _ = load_mulran_dataset(scene)
         return scan_files
+    if dataset == 'OXFORD':
+        scan_files, _, _ = load_oxford_dataset(scene)
+        return scan_files
     raise ValueError(f'Unsupported dataset: {dataset}')
 
 
@@ -87,6 +96,8 @@ def _load_scan_pcd(dataset: str, scan_file: str):
         return load_kitti_velodyne_pcd(scan_file)
     if dataset == 'MulRan':
         return load_mulran_ouster_pcd(scan_file)
+    if dataset == 'OXFORD':
+        return load_oxford_lidar_pcd(scan_file)
     raise ValueError(f'Unsupported dataset: {dataset}')
 
 
@@ -179,7 +190,7 @@ def main() -> None:
     )
     parser.add_argument('--output_png', default='')
     args = parser.parse_args()
-    datasets = ['KITTI', 'MulRan']
+    datasets = list(DEFAULT_SCENES.keys())
     selected_scenes = {dataset: list(DEFAULT_SCENES[dataset]) for dataset in datasets}
 
     output_png = args.output_png.strip() if args.output_png else ''

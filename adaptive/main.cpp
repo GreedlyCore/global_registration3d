@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <limits>
 #include <fstream>
+#include <string>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/io/pcd_io.h>
 #include <pcl/common/pca.h>
 #include <pcl/common/centroid.h>
 #include <pcl/common/distances.h>
@@ -336,13 +338,13 @@ GeometricBootstrappingResult geometricBootstrappingPipeline(
 }
 
 
-// Load KITTI velodyne .bin file (x, y, z, reflectance as float32)
-CloudPtr loadKittiPointCloud(const std::string& filepath) {
+// Load generic LiDAR .bin file with float32 layout: x, y, z, intensity
+CloudPtr loadBinPointCloudXYZI(const std::string& filepath, const std::string& dataset_name) {
     CloudPtr cloud(new CloudT);
     
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Error: Cannot open KITTI file: " << filepath << "\n";
+        std::cerr << "Error: Cannot open " << dataset_name << " .bin file: " << filepath << "\n";
         return cloud;
     }
     
@@ -367,14 +369,39 @@ CloudPtr loadKittiPointCloud(const std::string& filepath) {
     return cloud;
 }
 
+// Load KITTI velodyne .bin file (x, y, z, reflectance as float32)
+CloudPtr loadKittiPointCloud(const std::string& filepath) {
+    return loadBinPointCloudXYZI(filepath, "KITTI");
+}
+
+// Load MulRan Ouster .bin file (x, y, z, intensity as float32)
+CloudPtr loadMulranPointCloud(const std::string& filepath) {
+    return loadBinPointCloudXYZI(filepath, "MulRan");
+}
+
+// Load Oxford .pcd file
+CloudPtr loadOxfordPointCloud(const std::string& filepath) {
+    CloudPtr cloud(new CloudT);
+    if (pcl::io::loadPCDFile<PointT>(filepath, *cloud) < 0) {
+        std::cerr << "Error: Cannot open Oxford PCD file: " << filepath << "\n";
+        return CloudPtr(new CloudT);
+    }
+
+    std::cout << "Loaded " << cloud->size() << " points from " << filepath << "\n";
+    return cloud;
+}
+
 // Example usage
-int main() {
-    const bool USE_KITTI_DEMO = true;
+int main(int argc, char** argv) {
+    std::string demo_type = "kitti";
+    if (argc > 1) {
+        demo_type = argv[1];
+    }
     
     CloudPtr cloud_src(new CloudT);
     CloudPtr cloud_tgt(new CloudT);
     
-    if (USE_KITTI_DEMO) {
+    if (demo_type == "kitti") {
         // ===== KITTI DEMO =====
         std::cout << "\n=== KITTI Dataset Demo (Sequence 05) ===\n\n";
         
@@ -389,7 +416,45 @@ int main() {
             std::cerr << "Failed to load KITTI files. Check paths exist.\n";
             return 1;
         }
-    } else {
+    } else if (demo_type == "oxford") {
+        // ===== OXFORD DEMO =====
+        const std::string oxford_seq = "2024-03-20-christ-church-06";
+        std::cout << "\n=== Oxford Dataset Demo (Sequence " << oxford_seq << ") ===\n\n";
+
+        std::string oxford_base = "/home/sonieth2/thesis/global_registration3d/data/OXFORD/" + oxford_seq + "/lidar-clouds";
+        std::string src_file = oxford_base + "/1710927714.179242000.pcd";
+        std::string tgt_file = oxford_base + "/1710927714.279141000.pcd";
+
+        std::cout << "Sequence " << oxford_seq << " -> 1710927714.179242000.pcd\n";
+        std::cout << "Sequence " << oxford_seq << " -> 1710927714.279141000.pcd\n";
+
+        cloud_src = loadOxfordPointCloud(src_file);
+        cloud_tgt = loadOxfordPointCloud(tgt_file);
+
+        if (cloud_src->empty() || cloud_tgt->empty()) {
+            std::cerr << "Failed to load Oxford files. Check paths exist.\n";
+            return 1;
+        }
+    } else if (demo_type == "mulran") {
+        // ===== MULRAN DEMO =====
+        const std::string mulran_seq = "RIVERSIDE02";
+        std::cout << "\n=== MulRan Dataset Demo (Sequence " << mulran_seq << ") ===\n\n";
+
+        std::string mulran_base = "/home/sonieth2/thesis/global_registration3d/data/MulRan/" + mulran_seq + "/Ouster";
+        std::string src_file = mulran_base + "/1565943695327979143.bin";
+        std::string tgt_file = mulran_base + "/1565943695427969272.bin";
+
+        std::cout << "Sequence " << mulran_seq << " -> 1565943695327979143.bin\n";
+        std::cout << "Sequence " << mulran_seq << " -> 1565943695427969272.bin\n";
+
+        cloud_src = loadMulranPointCloud(src_file);
+        cloud_tgt = loadMulranPointCloud(tgt_file);
+
+        if (cloud_src->empty() || cloud_tgt->empty()) {
+            std::cerr << "Failed to load MulRan files. Check paths exist.\n";
+            return 1;
+        }
+    } else if (demo_type == "simple") {
         // ===== SYNTHETIC DEMO =====
         std::cout << "\n=== Synthetic LiDAR Demo (Disc-shaped clouds) ===\n\n";
     
@@ -414,6 +479,10 @@ int main() {
             p.z = z_dist(gen);
             cloud_tgt->push_back(p);
         }
+    } else {
+        std::cerr << "Unknown demo type: " << demo_type << "\n";
+        std::cerr << "Use one of: simple, oxford, mulran, kitti\n";
+        return 1;
     }
     
     std::cout << "Source cloud: " << cloud_src->size() << " points\n";

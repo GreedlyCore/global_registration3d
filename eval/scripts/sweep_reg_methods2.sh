@@ -24,7 +24,7 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 
 BASE_OUT=${BASE_OUT:-results/feat_research/$(date +%H-%M-%S.%N | sed 's/[0-9]\{6\}$//')}
-TEST_COUNT=${TEST_COUNT:-5}
+TEST_COUNT=${TEST_COUNT:-10}
 SEED=${SEED:-42}
 
 if ! mkdir -p "$BASE_OUT" 2>/dev/null; then
@@ -54,14 +54,10 @@ METHODS=(mac teaser quatro kiss)
 
 # FEATS=(FasterPFH)
 FEATS=(FasterPFH FPFH)
+# FEATS=(FasterPFH FPFH SHOT_PCL)
 
-# FEATS=(SHOT_PCL)
 
-# VOXELS=(0.1 0.3 0.5 0.7)
-# ALPHAS=(2.0 2.5 3.0 3.5 4.0)
-# BETAS=(4.0 5.0 6.0 7.0 8.0)
-
-# VOXELS=(0.1 0.3 0.5 0.7)
+# VOXELS=(0.1 0.3 0.5 0.7) # met some issues with 0.1, investigate later ...
 VOXELS=(0.3 0.5 0.7 1.0) 
 # VOXELS=(0.7) # for rapid tests
 ALPHA_MULTI=${ALPHA_MULTI:-3.5} # 2 // 3.5
@@ -77,16 +73,6 @@ for v in "${VOXELS[@]}"; do
     BETAS+=("$beta")
 done
 
-# Format with 2 decimal places for nicer output
-# echo "Configuration:"
-# echo "  Alpha multiplier: $ALPHA_MULTI"
-# echo "  Beta multiplier:  $BETA_MULTI"
-# echo
-# echo "Results:"
-# for i in "${!VOXELS[@]}"; do
-#     printf "voxel=%.1f → alpha=%.2f, beta=%.2f\n" \
-#            "${VOXELS[$i]}" "${ALPHAS[$i]}" "${BETAS[$i]}"
-# done
 
 
 KITTI_SEQS=(01 02 03 04 05 06 07 08 09 10)
@@ -95,30 +81,10 @@ MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
 # MULRAN_SEQS=()
 # OXFORD_SEQS=(2024-03-18-christ-church-01 2024-03-18-christ-church-02 2024-03-20-christ-church-06)
 
-# VIRAL_SEQS = () # TODO
-# NCLT -- ? think twice
 
-
-# 1 * 1 * 4 * 5 * 5 * 2 * 3 = 600 runs 
-# METHODS=(quatro)
-# FEATS=(FasterPFH)
-# VOXELS=(0.1 0.3 0.5 0.7)
-# ALPHAS=(2.0 2.5 3.0 3.5 4.0)
-# BETAS=(4.0 5.0 6.0 7.0 8.0)
-# ALPHAS=(2.0 2.5 )
-# BETAS=(4.0 5.0 )
-# KITTI_SEQS=( )
-# MULRAN_SEQS=( RIVERSIDE02 )
-
-# N = N_{fail} + N_{succ} 
-# N = TEST_COUNT * ( len(KITTI_SEQS) + len(MULRAN_SEQS) + len(OXFORD_SEQS) )
-# KITTI_SEQS=(01 04)
-# MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
-
-# Doing a single GT bin 
-DIST_MINS=(10)
-DIST_MAXS=(12)
-DIST_TAGS=("10_12")
+DIST_MINS=(2 6 10 15)
+DIST_MAXS=(6 10 12 20)
+DIST_TAGS=("2_6" "6_10" "10_12" "15_20")
 
 RUNS_DIR="$BASE_OUT/runs"
 OVERALL_DIR="$BASE_OUT/overall"

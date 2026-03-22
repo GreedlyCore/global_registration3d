@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(adaptive_geometric_bootstrapping LANGUAGES CXX)
+project(adaptive_geometric_bootstrapping LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,8 +10,13 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
 endif()
 
+find_package(MPI QUIET COMPONENTS C)
+if(NOT TARGET MPI::MPI_C)
+    add_library(MPI::MPI_C INTERFACE IMPORTED)
+endif()
+
 find_package(Eigen3 REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common filters kdtree)
+find_package(PCL REQUIRED COMPONENTS common filters kdtree io)
 find_package(OpenMP REQUIRED)
 
 add_executable(adaptive_bootstrap main.cpp)

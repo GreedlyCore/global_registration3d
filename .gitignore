@@ -11,6 +11,7 @@ results/
 eval/__pycache__/*
 visualize/__pycache__/*
 plot/__pycache__/*
+eval/scripts/__pycache__/*
 __pycache__/*
 imgui.ini
 

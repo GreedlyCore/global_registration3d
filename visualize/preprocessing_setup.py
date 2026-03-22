@@ -24,10 +24,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
 sys.path.insert(0, REPO_ROOT)
 sys.path.insert(0, os.path.join(REPO_ROOT, 'eval'))
-from utils.kitti_loader import load_kitti_velodyne
-from utils.nclt_loader import get_nclt_sync_files, load_nclt_pointcloud
-from utils.pcl_filters import voxel_filter, radius_filter, every_n_filter, mahal_filter
-from dataset_loader import load_mulran_dataset, load_mulran_ouster
+from dataset_loader import (
+    load_kitti_dataset,
+    load_kitti_velodyne,
+    load_nclt_dataset,
+    load_nclt_velodyne,
+    load_mulran_dataset,
+    load_mulran_ouster,
+    load_oxford_dataset,
+    load_oxford_lidar,
+)
 
 KITTI_BASE_PATH = os.path.join(REPO_ROOT, 'data', 'KITTI')
 NCLT_BASE_PATH  = os.path.join(REPO_ROOT, 'data', 'NCLT')
@@ -44,6 +50,51 @@ def _get_kitti_scan_files(scene):
     )
 
 
+def every_n_filter(points: np.ndarray, n: int, verbose: bool = False) -> np.ndarray:
+    step = max(int(n), 1)
+    return points[::step]
+
+
+def radius_filter(points: np.ndarray, rmin: float, rmax: float, verbose: bool = False) -> np.ndarray:
+    if points.size == 0:
+        return points
+    xyz = points[:, :3]
+    dist = np.linalg.norm(xyz, axis=1)
+    keep = (dist >= float(rmin)) & (dist <= float(rmax))
+    return points[keep]
+
+
+def voxel_filter(points: np.ndarray, voxel_size: float, verbose: bool = False) -> np.ndarray:
+    if points.size == 0:
+        return points
+    v = float(voxel_size)
+    if v <= 0.0:
+        return points
+
+    xyz = points[:, :3]
+    keys = np.floor(xyz / v).astype(np.int64)
+    _, keep_idx = np.unique(keys, axis=0, return_index=True)
+    keep_idx.sort()
+    return points[keep_idx]
+
+
+def mahal_filter(points: np.ndarray, threshold: float, verbose: bool = False) -> np.ndarray:
+    if points.size == 0:
+        return points
+    xyz = points[:, :3]
+    if xyz.shape[0] < 5:
+        return points
+
+    mean = np.mean(xyz, axis=0)
+    centered = xyz - mean
+    cov = np.cov(centered, rowvar=False)
+    cov += 1e-6 * np.eye(3)
+    inv_cov = np.linalg.inv(cov)
+    md2 = np.einsum('ij,jk,ik->i', centered, inv_cov, centered)
+    keep = md2 <= float(threshold) ** 2
+    return points[keep]
+
+
 class PreprocessingVisualizer:
     def __init__(self, dataset, scene):
         self.dataset = dataset
@@ -51,12 +102,12 @@ class PreprocessingVisualizer:
         self.current_index = 0
 
         if dataset == 'kitti':
-            self.scan_files = _get_kitti_scan_files(scene)
+            self.scan_files, _, _ = load_kitti_dataset(scene)
             self.total_scans = len(self.scan_files)
             print(f'KITTI / seq {scene} ({self.total_scans} scans)')
 
         elif dataset == 'nclt':
-            self.scan_files = get_nclt_sync_files(NCLT_BASE_PATH, scene)
+            self.scan_files, _, _ = load_nclt_dataset(scene)
             self.total_scans = len(self.scan_files)
             print(f'NCLT / {scene} ({self.total_scans} scans)')
         elif dataset == 'mulran':
@@ -65,6 +116,10 @@ class PreprocessingVisualizer:
             self.scan_files, _, _ = load_mulran_dataset(scene)
             self.total_scans = len(self.scan_files)
             print(f'MulRan / {scene} ({self.total_scans} scans)')
+        elif dataset == 'oxford':
+            self.scan_files, _, _ = load_oxford_dataset(scene)
+            self.total_scans = len(self.scan_files)
+            print(f'Oxford / {scene} ({self.total_scans} scans)')
         else:
             raise ValueError(f'Unknown dataset: {dataset}')
 
@@ -95,9 +150,11 @@ class PreprocessingVisualizer:
         if self.dataset == 'kitti':
             points = load_kitti_velodyne(self.scan_files[index])
         elif self.dataset == 'nclt':
-            points = load_nclt_pointcloud(self.scan_files[index])
-        else: 
+            points = load_nclt_velodyne(self.scan_files[index])
+        elif self.dataset == 'mulran':
             points = load_mulran_ouster(self.scan_files[index])
+        else:
+            points = load_oxford_lidar(self.scan_files[index])
         original = len(points)
 
         # Apply filters
@@ -248,9 +305,9 @@ class PreprocessingVisualizer:
 
 def main():
     parser = argparse.ArgumentParser(description='Preprocessing setup visualizer for KITTI/NCLT/MulRan datasets')
-    parser.add_argument('--dataset', type=str, required=True, choices=['kitti', 'nclt', 'mulran'])
+    parser.add_argument('--dataset', type=str, required=True, choices=['kitti', 'nclt', 'mulran', 'oxford'])
     parser.add_argument('--scene', type=str, required=True,
-                        help='Sequence ID: 01/04 for KITTI, 2013-01-10 for NCLT, DCC02 for MulRan')
+                        help='Sequence ID: 01/04 for KITTI, 2013-01-10 for NCLT, DCC02 for MulRan, <seq_name> for Oxford')
     args = parser.parse_args()
 
     visualizer = PreprocessingVisualizer(args.dataset, args.scene)

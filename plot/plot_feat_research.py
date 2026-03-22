@@ -43,16 +43,41 @@ def _read_rows(path: str) -> List[Dict[str, str]]:
 
 
 def _build_lookup(rows: List[Dict[str, str]]) -> Dict[Tuple[float, float, float], Dict[str, float]]:
-    lookup: Dict[Tuple[float, float, float], Dict[str, float]] = {}
+    accum: Dict[Tuple[float, float, float], Dict[str, float]] = {}
     for r in rows:
         key = (
             _safe_float(r.get('voxel_size', 'nan')),
             _safe_float(r.get('alpha', 'nan')),
             _safe_float(r.get('beta', 'nan')),
         )
+        if not np.isfinite(key[0]) or not np.isfinite(key[1]) or not np.isfinite(key[2]):
+            continue
+
+        bucket = accum.setdefault(
+            key,
+            {
+                'sr_sum': 0.0,
+                'sr_n': 0.0,
+                'tm_sum': 0.0,
+                'tm_n': 0.0,
+            },
+        )
+
+        sr = _safe_float(r.get('sr_percent_mean', 'nan'))
+        tm = _safe_float(r.get('time_s_mean', 'nan'))
+
+        if np.isfinite(sr):
+            bucket['sr_sum'] += sr
+            bucket['sr_n'] += 1.0
+        if np.isfinite(tm):
+            bucket['tm_sum'] += tm
+            bucket['tm_n'] += 1.0
+
+    lookup: Dict[Tuple[float, float, float], Dict[str, float]] = {}
+    for key, b in accum.items():
         lookup[key] = {
-            'sr': _safe_float(r.get('sr_percent_mean', 'nan')),
-            'tm': _safe_float(r.get('time_s_mean', 'nan')),
+            'sr': (b['sr_sum'] / b['sr_n']) if b['sr_n'] > 0 else float('nan'),
+            'tm': (b['tm_sum'] / b['tm_n']) if b['tm_n'] > 0 else float('nan'),
         }
     return lookup
 
@@ -63,8 +88,19 @@ def _default_output_path(input_csv: str) -> str:
     return os.path.join(folder, f'{base}_fig7.png')
 
 
+def _unique_sorted_floats(rows: List[Dict[str, str]], column: str) -> List[float]:
+    vals = {_safe_float(r.get(column, 'nan')) for r in rows}
+    finite_vals = [v for v in vals if np.isfinite(v)]
+    return sorted(finite_vals)
+
+
 def _build_grids(rows: List[Dict[str, str]]):
-    voxels, alphas, betas = parameter_grid()
+    default_voxels, default_alphas, default_betas = parameter_grid()
+
+    voxels = _unique_sorted_floats(rows, 'voxel_size') or [float(v) for v in default_voxels]
+    alphas = _unique_sorted_floats(rows, 'alpha') or [float(a) for a in default_alphas]
+    betas = _unique_sorted_floats(rows, 'beta') or [float(b) for b in default_betas]
+
     lookup = _build_lookup(rows)
 
     sr_data = []

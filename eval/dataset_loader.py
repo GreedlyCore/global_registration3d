@@ -104,7 +104,6 @@ def load_kitti_ground_truth(sequence, kitti_dir, start_idx=0, end_idx=None):
 
     return poses_cam, Tr
 
-
 def load_kitti_dataset(seq):
     """
     High-level loader for a KITTI sequence.
@@ -126,9 +125,6 @@ def load_kitti_dataset(seq):
 
     return scan_files, poses_cam, Tr
 
-
-# ──────────────────────────────── NCLT ────────────────────────────────────── #
-
 _NCLT_DTYPE  = np.dtype([('x', np.uint16), ('y', np.uint16), ('z', np.uint16),
                           ('i', np.uint8),  ('l', np.uint8)])
 _NCLT_SCALE  = 0.005     # metres per uint16 unit
@@ -145,14 +141,12 @@ def load_nclt_velodyne(filepath):
     ], axis=1)
     return xyz
 
-
 def load_nclt_velodyne_pcd(filepath):
     """Load one NCLT velodyne_sync/*.bin scan as an open3d PointCloud."""
     pts = load_nclt_velodyne(filepath)
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(pts.astype(np.float64))
     return pcd
-
 
 def _euler_to_rot(roll, pitch, heading):
     """NED Euler angles → 3×3 rotation matrix (body → world). R = Rz(h) Ry(p) Rx(r)."""
@@ -163,7 +157,6 @@ def _euler_to_rot(roll, pitch, heading):
     Ry = np.array([[cp, 0,  sp ], [0,   1,   0 ], [-sp, 0,  cp]])
     Rz = np.array([[ch, -sh, 0 ], [sh,  ch,  0 ], [0,   0,   1]])
     return Rz @ Ry @ Rx
-
 
 def load_nclt_ground_truth(seq, nclt_dir):
     """
@@ -210,7 +203,6 @@ def load_nclt_ground_truth(seq, nclt_dir):
     print(f'Loaded {len(poses)} NCLT poses for seq {seq}')
     return poses, scan_files
 
-
 def load_nclt_dataset(seq):
     """
     High-level loader for an NCLT sequence.
@@ -218,9 +210,6 @@ def load_nclt_dataset(seq):
     """
     poses, scan_files = load_nclt_ground_truth(seq, NCLT_DIR)
     return scan_files, poses, np.eye(4)
-
-
-# ─────────────────────────────── MulRan ───────────────────────────────────── #
 
 def load_mulran_ouster(filepath):
     """
