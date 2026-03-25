@@ -236,6 +236,27 @@ def get_mac_solver_params(noise_bound, cfg=None):
     }
 
 
+def get_macpp_solver_params(noise_bound, cfg=None, dataset_name='3dmatch', descriptor='fpfh'):
+    """Return kwargs dict for macpp_solver.macpp_solve from config.
+
+    Args:
+        noise_bound : fallback for inlier_thresh when cfg['inlier_thresh'] is null/None
+        cfg         : optional dict of overrides from the JSON "macpp" block.
+                      Supported keys and their defaults:
+                        inlier_thresh  (null -> noise_bound)
+                        dataset_name   (defaults to current eval dataset)
+                        descriptor     (defaults to feat-driven fallback)
+    """
+    if cfg is None:
+        cfg = {}
+    inlier_thresh = cfg.get('inlier_thresh') or noise_bound
+    return {
+        'inlier_thresh': float(inlier_thresh),
+        'dataset_name': str(cfg.get('dataset_name', dataset_name)),
+        'descriptor': str(cfg.get('descriptor', descriptor)),
+    }
+
+
 def get_quatro_solver_params(noise_bound, cfg=None):
     """Return kwargs dict for quatro_solver.quatro_solve from config.
 

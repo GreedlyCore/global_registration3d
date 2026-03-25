@@ -12,6 +12,7 @@ The detail CSV must have at least these columns:
 
 
 python3 eval/scripts/aggregate_detail.py results/feat_research_user/15-07-29/overall_detail.csv results/feat_research_user/15-07-29/overall
+python3 eval/scripts/aggregate_detail.py /home/sonieth3/Documents/analyze_logs/19-08-33.943/overall_detail.csv /home/sonieth3/Documents/analyze_logs/19-08-33.943
     
 """
 import csv

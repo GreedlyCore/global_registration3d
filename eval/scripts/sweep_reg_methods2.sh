@@ -48,7 +48,8 @@ done
 
 
 
-METHODS=(mac teaser quatro kiss)
+# METHODS=(macpp mac teaser quatro kiss)
+METHODS=(macpp)
 # METHODS=(mac)
 # METHODS=(kiss)
 
@@ -58,8 +59,8 @@ FEATS=(FasterPFH FPFH)
 
 
 # VOXELS=(0.1 0.3 0.5 0.7) # met some issues with 0.1, investigate later ...
-VOXELS=(0.3 0.5 0.7 1.0) 
-# VOXELS=(0.7) # for rapid tests
+# VOXELS=(0.3 0.5 0.7 1.0) 
+VOXELS=(0.5) # for rapid tests
 ALPHA_MULTI=${ALPHA_MULTI:-3.5} # 2 // 3.5
 BETA_MULTI=${BETA_MULTI:-5.0}  # 5 // 5
 
@@ -75,7 +76,9 @@ done
 
 
 
-KITTI_SEQS=(01 02 03 04 05 06 07 08 09 10)
+# KITTI_SEQS=(01 02 03 04 05 06 07 08 09 10)
+# MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
+KITTI_SEQS=(01 04 )
 MULRAN_SEQS=(DCC02 RIVERSIDE02 KAIST02)
 # KITTI_SEQS=()
 # MULRAN_SEQS=()

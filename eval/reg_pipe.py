@@ -12,6 +12,7 @@ from helpers import (
     find_correspondences,
     get_teaser_solver,
     get_mac_solver_params,
+    get_macpp_solver_params,
     get_quatro_solver_params,
     resolve_descriptor_params,
     Rt2T,
@@ -34,6 +35,28 @@ def _downsample_tbb(pcd, voxel_size):
     ds = o3d.geometry.PointCloud()
     ds.points = o3d.utility.Vector3dVector(pts_out.astype(np.float64))
     return ds
+
+
+def _import_macpp_solver():
+    """Import macpp_solver, trying local build/eval locations first."""
+    try:
+        import macpp_solver  # type: ignore
+        return macpp_solver
+    except Exception:
+        pass
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    candidate_py_dirs = [
+        os.path.join(repo_root, 'eval'),
+        os.path.join(repo_root, 'MAC-PLUS-PLUS', 'src', 'build_pybind'),
+    ]
+
+    for d in candidate_py_dirs:
+        if os.path.isdir(d) and d not in sys.path:
+            sys.path.insert(0, d)
+
+    import macpp_solver  # type: ignore
+    return macpp_solver
 
 
 def _import_quatro_solver():
@@ -70,8 +93,8 @@ def _import_quatro_solver():
 def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
                      reg_method='teaser', feat_method='FPFH', corr_method='nn',
                      downsample_method='o3d',
-                     teaser_cfg=None, mac_cfg=None, quatro_cfg=None,
-                     feat_cfg=None):
+                     teaser_cfg=None, mac_cfg=None, macpp_cfg=None, quatro_cfg=None,
+                     feat_cfg=None, dataset_name=None):
     """
     Feature-based point cloud registration pipeline.
 
@@ -79,10 +102,11 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         src_pcd           : open3d.geometry.PointCloud  (source)
         tgt_pcd           : open3d.geometry.PointCloud  (target)
         voxel_size        : voxel size for downsampling and feature radius
-        reg_method        : 'teaser' | 'mac' | 'quatro' | 'kiss'
+        reg_method        : 'teaser' | 'mac' | 'macpp' | 'quatro' | 'kiss'
         feat_method       : 'FPFH' (o3d) | 'FPFH_PCL' / FasterPFH' (kiss_matcher PCL binding) | 'SHOT_PCL'
         corr_method       : 'nn'  (mutual nearest-neighbor in feature space)
         downsample_method : 'o3d' (open3d voxel_down_sample) | 'tbb_vector' (kiss_matcher TBB)
+        dataset_name      : dataset tag forwarded to method-specific solvers (used by macpp)
 
     Returns:
         T_pred     : (4, 4) numpy float64 — predicted transform src -> tgt
@@ -226,6 +250,42 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         )
         corr_stats = graph_stats_mac(
             src_corr.T, tgt_corr.T, T_pred, inlier_thresh=mac_kwargs['inlier_thresh'])
+    elif reg_method == 'macpp':
+        macpp_solver = _import_macpp_solver()
+
+        if feat_method in ('FPFH', 'FPFH_PCL', 'FasterPFH', 'SHOT_PCL'):
+            descriptor_for_macpp = 'fpfh'
+        else:
+            descriptor_for_macpp = feat_method.lower()
+
+        ds = (dataset_name or 'KITTI').upper()
+        if ds == 'KITTI':
+            dataset_for_macpp = 'KITTI'
+        elif ds == '3DMATCH':
+            dataset_for_macpp = '3dmatch'
+        elif ds == '3DLOMATCH':
+            dataset_for_macpp = '3dlomatch'
+        elif ds == 'U3M':
+            dataset_for_macpp = 'U3M'
+        else:
+            dataset_for_macpp = 'KITTI'
+
+        macpp_kwargs = get_macpp_solver_params(
+            noise_bound=voxel_size,
+            cfg=macpp_cfg,
+            dataset_name=dataset_for_macpp,
+            descriptor=descriptor_for_macpp,
+        )
+        T_pred = np.asarray(
+            macpp_solver.macpp_solve(
+                src_corr.T.astype(np.float32),
+                tgt_corr.T.astype(np.float32),
+                **macpp_kwargs,
+            ),
+            dtype=np.float64,
+        )
+        corr_stats = graph_stats_mac(
+            src_corr.T, tgt_corr.T, T_pred, inlier_thresh=macpp_kwargs['inlier_thresh'])
     elif reg_method == 'quatro':
         quatro_solver = _import_quatro_solver()
         quatro_kwargs = get_quatro_solver_params(noise_bound=voxel_size, cfg=quatro_cfg)

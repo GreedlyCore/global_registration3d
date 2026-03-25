@@ -4,6 +4,10 @@
 # could be dataset data or symlinks that refers to it
 data
 
+# related to thesis investigation
+books
+latex
+
 logs/
 adaptive/build
 utils/

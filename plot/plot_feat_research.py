@@ -9,6 +9,9 @@ Input CSV expected columns:
 Example:
   python3 plot/plot_feat_research.py \
       --input_csv results/feat_research/12-00-00/overall/overall_kiss_FasterPFH.csv
+
+python3 plot/plot_feat_research.py \
+      --input_csv /home/sonieth3/Documents/analyze_logs/19-08-33.943/overall_kiss_FPFH.csv
 """
 
 from __future__ import annotations

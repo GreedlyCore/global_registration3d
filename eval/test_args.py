@@ -10,7 +10,7 @@ from helpers import resolve_feature_cfg
 
 
 FEAT_METHOD_CHOICES = ("FPFH", "FPFH_PCL", "FasterPFH", "SHOT_PCL")
-REG_METHOD_CHOICES = ("teaser", "mac", "quatro", "kiss")
+REG_METHOD_CHOICES = ("teaser", "mac", "macpp", "quatro", "kiss")
 TEST_TYPE_CHOICES = ("random", "scan2scan")
 
 
@@ -66,6 +66,7 @@ def finalize_args(
     """Attach nested config blocks and validate cross-argument requirements."""
     args.teaser = cfg.get("teaser", {})
     args.mac = cfg.get("mac", {})
+    args.macpp = cfg.get("macpp", {})
     args.quatro = cfg.get("quatro", {})
     args.feat_cfg = resolve_feature_cfg(cfg, args.feat)
 

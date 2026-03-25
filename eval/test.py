@@ -97,8 +97,10 @@ def eval_sequence(args, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
             corr_method='nn',
             teaser_cfg=args.teaser,
             mac_cfg=args.mac,
+            macpp_cfg=args.macpp,
             quatro_cfg=args.quatro,
             feat_cfg=args.feat_cfg,
+            dataset_name=args.dataset,
         )
 
         # Compute metrics

@@ -33,6 +33,10 @@ cd "$REPO_ROOT"
 echo "Building MAC..."
 bash "$REPO_ROOT/MAC/build.sh"
 
+# MAC++ binaries + python binding
+echo "Building MAC++..."
+bash "$REPO_ROOT/rebuild_macpp.sh"
+
 # 5. TEASER++ clone + python binding
 echo "Cloning TEASER++..."
 if [ ! -d "$REPO_ROOT/TEASER-plusplus/.git" ]; then
