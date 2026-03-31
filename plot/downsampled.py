@@ -8,9 +8,9 @@ This script:
 3) aggregates #points across fixed benchmark scenes and plots mean/std bands
 
 
-python3 plot/plot_downsampled.py
+python3 plot/downsampled.py
 # Faster preview by subsampling scans per scene
-python3 plot/plot_downsampled.py --max_scans_per_scene 200
+python3 plot/downsampled.py --max_scans_per_scene 200
 
 """
 

@@ -18,7 +18,7 @@
     "xlabel_time_s": "Average Time (s)",
     "xlabel_reg_time_s": "Average Registration Time (s)",
     "scene_prefix": "Scene",
-    "legend_downsampling": "Point Cloud Resolution Reduction",
+    "legend_downsampling": "Downsampling",
     "legend_features_creation": "Features Creation",
     "legend_corr_creation": "Correspondence Creation",
     "legend_registration": "Registration"
