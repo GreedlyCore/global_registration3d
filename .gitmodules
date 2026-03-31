@@ -7,3 +7,7 @@
 [submodule "Quatro"]
 	path = Quatro
 	url = https://github.com/GreedlyCore/Quatro.git
+[submodule "GMOR"]
+	path = GMOR
+	url = https://github.com/GreedlyCore/GMOR.git
+	branch = my-changes
