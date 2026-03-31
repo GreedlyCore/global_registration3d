@@ -10,7 +10,7 @@ from helpers import resolve_feature_cfg
 
 
 FEAT_METHOD_CHOICES = ("FPFH", "FPFH_PCL", "FasterPFH", "SHOT_PCL")
-REG_METHOD_CHOICES = ("teaser", "mac", "macpp", "quatro", "kiss")
+REG_METHOD_CHOICES = ("teaser", "mac", "macpp", "quatro", "kiss", "gmor", "trde")
 TEST_TYPE_CHOICES = ("random", "scan2scan")
 
 
@@ -68,6 +68,8 @@ def finalize_args(
     args.mac = cfg.get("mac", {})
     args.macpp = cfg.get("macpp", {})
     args.quatro = cfg.get("quatro", {})
+    args.gmor = cfg.get("gmor", {})
+    args.trde = cfg.get("trde", {})
     args.feat_cfg = resolve_feature_cfg(cfg, args.feat)
 
     if args.rnormal is not None:

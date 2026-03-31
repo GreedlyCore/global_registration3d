@@ -288,6 +288,62 @@ def get_quatro_solver_params(noise_bound, cfg=None):
     }
 
 
+def get_gmor_solver_params(noise_bound, cfg=None):
+    """Return kwargs dict for gmor_trde_solver.gmor_solve from config.
+
+    Args:
+        noise_bound : fallback for noise_bound when cfg['noise_bound'] is null/None
+        cfg         : optional dict of overrides from the JSON "gmor" block.
+                      Supported keys and their defaults:
+                        noise_bound  (null -> noise_bound)
+                        top_k        (12)
+                        rho          (0.25)
+                        rot_near_z   (False)
+                        num_threads  (12)
+                        branch_eps   (5e-2)
+                        bound_eps    (1e-3)
+                        normalize    (False)
+    """
+    if cfg is None:
+        cfg = {}
+    gmor_noise_bound = cfg.get('noise_bound') or noise_bound
+    return {
+        'noise_bound': float(gmor_noise_bound),
+        'top_k': int(cfg.get('top_k', 12)),
+        'rho': float(cfg.get('rho', 0.25)),
+        'rot_near_z': bool(cfg.get('rot_near_z', False)),
+        'num_threads': int(cfg.get('num_threads', 12)),
+        'branch_eps': float(cfg.get('branch_eps', 5e-2)),
+        'bound_eps': float(cfg.get('bound_eps', 1e-3)),
+        'normalize': bool(cfg.get('normalize', False)),
+    }
+
+
+def get_trde_solver_params(noise_bound, cfg=None):
+    """Return kwargs dict for gmor_trde_solver.trde_solve from config.
+
+    Args:
+        noise_bound : fallback for noise_bound when cfg['noise_bound'] is null/None
+        cfg         : optional dict of overrides from the JSON "trde" block.
+                      Supported keys and their defaults:
+                        noise_bound  (null -> noise_bound)
+                        num_threads  (12)
+                        branch_eps   (5e-2)
+                        bound_eps    (1e-3)
+                        normalize    (True)
+    """
+    if cfg is None:
+        cfg = {}
+    trde_noise_bound = cfg.get('noise_bound') or noise_bound
+    return {
+        'noise_bound': float(trde_noise_bound),
+        'num_threads': int(cfg.get('num_threads', 12)),
+        'branch_eps': float(cfg.get('branch_eps', 5e-2)),
+        'bound_eps': float(cfg.get('bound_eps', 1e-3)),
+        'normalize': bool(cfg.get('normalize', True)),
+    }
+
+
 def Rt2T(R,t):
     T = np.identity(4)
     T[:3,:3] = R

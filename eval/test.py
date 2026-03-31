@@ -99,6 +99,8 @@ def eval_sequence(args, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
             mac_cfg=args.mac,
             macpp_cfg=args.macpp,
             quatro_cfg=args.quatro,
+            gmor_cfg=args.gmor,
+            trde_cfg=args.trde,
             feat_cfg=args.feat_cfg,
             dataset_name=args.dataset,
         )

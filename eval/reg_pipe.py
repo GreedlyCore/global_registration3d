@@ -10,10 +10,12 @@ import open3d as o3d
 from helpers import (
     extract_fpfh,
     find_correspondences,
+    get_gmor_solver_params,
     get_teaser_solver,
     get_mac_solver_params,
     get_macpp_solver_params,
     get_quatro_solver_params,
+    get_trde_solver_params,
     resolve_descriptor_params,
     Rt2T,
     pcd2xyz,
@@ -90,10 +92,33 @@ def _import_quatro_solver():
     return quatro_solver
 
 
+def _import_gmor_trde_solver():
+    """Import gmor_trde_solver, trying local build/eval locations first."""
+    try:
+        import gmor_trde_solver  # type: ignore
+        return gmor_trde_solver
+    except Exception:
+        pass
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    candidate_py_dirs = [
+        os.path.join(repo_root, 'eval'),
+        os.path.join(repo_root, 'GMOR', 'build_pybind'),
+    ]
+
+    for d in candidate_py_dirs:
+        if os.path.isdir(d) and d not in sys.path:
+            sys.path.insert(0, d)
+
+    import gmor_trde_solver  # type: ignore
+    return gmor_trde_solver
+
+
 def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
                      reg_method='teaser', feat_method='FPFH', corr_method='nn',
                      downsample_method='o3d',
                      teaser_cfg=None, mac_cfg=None, macpp_cfg=None, quatro_cfg=None,
+                     gmor_cfg=None, trde_cfg=None,
                      feat_cfg=None, dataset_name=None):
     """
     Feature-based point cloud registration pipeline.
@@ -102,7 +127,7 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         src_pcd           : open3d.geometry.PointCloud  (source)
         tgt_pcd           : open3d.geometry.PointCloud  (target)
         voxel_size        : voxel size for downsampling and feature radius
-        reg_method        : 'teaser' | 'mac' | 'macpp' | 'quatro' | 'kiss'
+        reg_method        : 'teaser' | 'mac' | 'macpp' | 'quatro' | 'kiss' | 'gmor' | 'trde'
         feat_method       : 'FPFH' (o3d) | 'FPFH_PCL' / FasterPFH' (kiss_matcher PCL binding) | 'SHOT_PCL'
         corr_method       : 'nn'  (mutual nearest-neighbor in feature space)
         downsample_method : 'o3d' (open3d voxel_down_sample) | 'tbb_vector' (kiss_matcher TBB)
@@ -312,6 +337,32 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
             )
             corr_stats = graph_stats_quatro(
                 src_corr.T, tgt_corr.T, T_pred, inlier_thresh=quatro_kwargs['noise_bound'])
+    elif reg_method == 'gmor':
+        gmor_trde_solver = _import_gmor_trde_solver()
+        gmor_kwargs = get_gmor_solver_params(noise_bound=voxel_size, cfg=gmor_cfg)
+        T_pred = np.asarray(
+            gmor_trde_solver.gmor_solve(
+                src_corr.T.astype(np.float32),
+                tgt_corr.T.astype(np.float32),
+                **gmor_kwargs,
+            ),
+            dtype=np.float64,
+        )
+        corr_stats = graph_stats_mac(
+            src_corr.T, tgt_corr.T, T_pred, inlier_thresh=gmor_kwargs['noise_bound'])
+    elif reg_method == 'trde':
+        gmor_trde_solver = _import_gmor_trde_solver()
+        trde_kwargs = get_trde_solver_params(noise_bound=voxel_size, cfg=trde_cfg)
+        T_pred = np.asarray(
+            gmor_trde_solver.trde_solve(
+                src_corr.T.astype(np.float32),
+                tgt_corr.T.astype(np.float32),
+                **trde_kwargs,
+            ),
+            dtype=np.float64,
+        )
+        corr_stats = graph_stats_mac(
+            src_corr.T, tgt_corr.T, T_pred, inlier_thresh=trde_kwargs['noise_bound'])
     else:
         raise ValueError(f"Unknown reg_method: {reg_method}")
     timings['registration'] = time.time() - t0

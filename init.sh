@@ -37,6 +37,14 @@ bash "$REPO_ROOT/MAC/build.sh"
 echo "Building MAC++..."
 bash "$REPO_ROOT/rebuild_macpp.sh"
 
+# GMOR / TRDE clone + build + python binding
+echo "Preparing GMOR..."
+if [ ! -d "$REPO_ROOT/GMOR" ]; then
+    git clone https://github.com/Bitzhaozheng/GMOR.git "$REPO_ROOT/GMOR"
+fi
+echo "Building GMOR + TRDE Python binding..."
+bash "$REPO_ROOT/rebuild_gmor_trde.sh"
+
 # 5. TEASER++ clone + python binding
 echo "Cloning TEASER++..."
 if [ ! -d "$REPO_ROOT/TEASER-plusplus/.git" ]; then

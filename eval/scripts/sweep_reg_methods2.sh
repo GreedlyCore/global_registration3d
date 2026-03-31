@@ -48,8 +48,8 @@ done
 
 
 
-# METHODS=(macpp mac teaser quatro kiss)
-METHODS=(macpp)
+# METHODS=(macpp mac teaser quatro kiss gmor trde)
+METHODS=(trde)
 # METHODS=(mac)
 # METHODS=(kiss)
 
