@@ -11,3 +11,7 @@
 	path = GMOR
 	url = https://github.com/GreedlyCore/GMOR.git
 	branch = my-changes
+[submodule "MACPP"]
+	path = MACPP
+	url = https://github.com/GreedlyCore/MAC-PLUS-PLUS.git
+	branch = my-changes
