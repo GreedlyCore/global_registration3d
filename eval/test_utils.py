@@ -72,7 +72,11 @@ class Metrics:
         }
 
 
-def load_dataset_loader(dataset: str, seq: str) -> Tuple[List[str], np.ndarray, np.ndarray, Callable, str]:
+def load_dataset_loader(
+    dataset: str,
+    seq: str,
+    selected_indices=None,
+) -> Tuple[List[str], Any, np.ndarray, Callable, str]:
     """
     Load dataset and return scan files, poses, transformation matrix, loader function.
     
@@ -85,17 +89,17 @@ def load_dataset_loader(dataset: str, seq: str) -> Tuple[List[str], np.ndarray, 
     
     if dataset == 'KITTI':
         seq = seq.zfill(2)
-        scan_files, poses, Tr = load_kitti_dataset(seq)
+        scan_files, poses, Tr = load_kitti_dataset(seq, selected_indices=selected_indices)
         load_pcd = load_kitti_velodyne_pcd
     elif dataset == 'NCLT':
-        scan_files, poses, Tr = load_nclt_dataset(seq)
+        scan_files, poses, Tr = load_nclt_dataset(seq, selected_indices=selected_indices)
         load_pcd = load_nclt_velodyne_pcd
     elif dataset == 'MULRAN':
         seq = seq.upper()
-        scan_files, poses, Tr = load_mulran_dataset(seq)
+        scan_files, poses, Tr = load_mulran_dataset(seq, selected_indices=selected_indices)
         load_pcd = load_mulran_ouster_pcd
     elif dataset == 'OXFORD':
-        scan_files, poses, Tr = load_oxford_dataset(seq)
+        scan_files, poses, Tr = load_oxford_dataset(seq, selected_indices=selected_indices)
         load_pcd = load_oxford_lidar_pcd
     else:
         raise ValueError(f'Unknown dataset: {dataset}')

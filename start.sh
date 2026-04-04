@@ -1,1 +1,0 @@
-source .venv2/bin/activate

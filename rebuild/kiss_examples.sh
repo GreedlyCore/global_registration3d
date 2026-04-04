@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EXAMPLES_DIR="$REPO_ROOT/KISS-Matcher/cpp/examples"
 
 echo "Clearing stale CMake cache..."

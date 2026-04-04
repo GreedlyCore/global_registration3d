@@ -36,6 +36,20 @@ def load_kitti_velodyne_pcd(filepath):
     return pcd
 
 
+def load_kitti_scan_files(seq):
+    velodyne_dir = os.path.join(KITTI_DIR, 'sequences', seq, 'velodyne')
+    if not os.path.isdir(velodyne_dir):
+        raise FileNotFoundError(f'Velodyne dir not found: {velodyne_dir}')
+
+    scan_files = sorted(
+        [os.path.join(velodyne_dir, f)
+         for f in os.listdir(velodyne_dir) if f.endswith('.bin')])
+    if not scan_files:
+        raise RuntimeError(f'No .bin files in {velodyne_dir}')
+
+    return scan_files
+
+
 def load_kitti_poses(pose_file):
 
     poses = []
@@ -66,7 +80,7 @@ def load_kitti_calib(calib_file):
     return Tr_full
 
 
-def load_kitti_ground_truth(sequence, kitti_dir, start_idx=0, end_idx=None):
+def load_kitti_ground_truth(sequence, kitti_dir, start_idx=0, end_idx=None, selected_indices=None):
     """
     Load KITTI ground truth poses in velodyne frame.
 
@@ -90,9 +104,33 @@ def load_kitti_ground_truth(sequence, kitti_dir, start_idx=0, end_idx=None):
     if not os.path.exists(calib_file):
         raise FileNotFoundError(f'Calibration file not found: {calib_file}')
 
-    # Load camera poses and calibration
-    poses_cam = load_kitti_poses(pose_file)
     Tr = load_kitti_calib(calib_file)
+
+    if selected_indices is not None:
+        wanted_indices = sorted({int(idx) for idx in selected_indices})
+        wanted_set = set(wanted_indices)
+        poses_cam = {}
+        with open(pose_file, 'r') as f:
+            for idx, line in enumerate(f):
+                if idx not in wanted_set:
+                    continue
+                T = np.fromstring(line, dtype=np.float64, sep=' ')
+                T = T.reshape(3, 4)
+                T_full = np.eye(4)
+                T_full[0:3, :] = T
+                poses_cam[idx] = T_full
+                if len(poses_cam) == len(wanted_indices):
+                    break
+
+        if len(poses_cam) != len(wanted_indices):
+            missing = [idx for idx in wanted_indices if idx not in poses_cam]
+            raise IndexError(f'KITTI pose indices out of range: {missing}')
+
+        print(f'Loaded {len(poses_cam)} KITTI poses ')
+        return poses_cam, Tr
+
+    # Load all camera poses.
+    poses_cam = load_kitti_poses(pose_file)
 
     # Slice poses if needed
     if end_idx is not None:
@@ -104,24 +142,16 @@ def load_kitti_ground_truth(sequence, kitti_dir, start_idx=0, end_idx=None):
 
     return poses_cam, Tr
 
-def load_kitti_dataset(seq):
+def load_kitti_dataset(seq, selected_indices=None):
     """
     High-level loader for a KITTI sequence.
     Returns (scan_files, poses_cam, Tr) — same interface as load_nclt_dataset.
     """
-    velodyne_dir = os.path.join(KITTI_DIR, 'sequences', seq, 'velodyne')
-    if not os.path.isdir(velodyne_dir):
-        raise FileNotFoundError(f'Velodyne dir not found: {velodyne_dir}')
-
-    scan_files = sorted(
-        [os.path.join(velodyne_dir, f)
-         for f in os.listdir(velodyne_dir) if f.endswith('.bin')])
-    if not scan_files:
-        raise RuntimeError(f'No .bin files in {velodyne_dir}')
-
-    poses_cam, Tr = load_kitti_ground_truth(seq, KITTI_DIR)
-    assert len(poses_cam) == len(scan_files), (
-        f'Pose count {len(poses_cam)} != scan count {len(scan_files)}')
+    scan_files = load_kitti_scan_files(seq)
+    poses_cam, Tr = load_kitti_ground_truth(seq, KITTI_DIR, selected_indices=selected_indices)
+    if selected_indices is None:
+        assert len(poses_cam) == len(scan_files), (
+            f'Pose count {len(poses_cam)} != scan count {len(scan_files)}')
 
     return scan_files, poses_cam, Tr
 
@@ -158,7 +188,20 @@ def _euler_to_rot(roll, pitch, heading):
     Rz = np.array([[ch, -sh, 0 ], [sh,  ch,  0 ], [0,   0,   1]])
     return Rz @ Ry @ Rx
 
-def load_nclt_ground_truth(seq, nclt_dir):
+def load_nclt_scan_files(seq):
+    seq_dir  = os.path.join(os.path.expanduser(NCLT_DIR), f'{seq}_vel', seq)
+    sync_dir = os.path.join(seq_dir, 'velodyne_sync')
+    if not os.path.isdir(sync_dir):
+        raise FileNotFoundError(f'velodyne_sync dir not found: {sync_dir}')
+
+    scan_files = sorted(
+        [os.path.join(sync_dir, f) for f in os.listdir(sync_dir) if f.endswith('.bin')])
+    if not scan_files:
+        raise RuntimeError(f'No .bin files in {sync_dir}')
+    return scan_files
+
+
+def load_nclt_ground_truth(seq, nclt_dir, selected_indices=None):
     """
     Load NCLT GT poses, one per velodyne_sync scan (matched by timestamp).
 
@@ -192,6 +235,19 @@ def load_nclt_ground_truth(seq, nclt_dir):
         [int(os.path.splitext(os.path.basename(f))[0]) for f in scan_files],
         dtype=np.float64)
 
+    if selected_indices is not None:
+        wanted_indices = sorted({int(idx) for idx in selected_indices})
+        pose_vals = interp(scan_ts[wanted_indices])
+        poses = {}
+        for idx, (x, y, z, roll, pitch, heading) in zip(wanted_indices, pose_vals):
+            T = np.eye(4)
+            T[:3, :3] = _euler_to_rot(roll, pitch, heading)
+            T[:3,  3] = [x, y, z]
+            poses[idx] = T
+
+        print(f'Loaded {len(poses)} NCLT poses for seq {seq} ')
+        return poses, scan_files
+
     pose_vals = interp(scan_ts)  # (N, 6)
     poses = []
     for x, y, z, roll, pitch, heading in pose_vals:
@@ -203,12 +259,12 @@ def load_nclt_ground_truth(seq, nclt_dir):
     print(f'Loaded {len(poses)} NCLT poses for seq {seq}')
     return poses, scan_files
 
-def load_nclt_dataset(seq):
+def load_nclt_dataset(seq, selected_indices=None):
     """
     High-level loader for an NCLT sequence.
     Returns (scan_files, poses, eye(4)) — Tr=eye(4) since poses are already in sensor frame.
     """
-    poses, scan_files = load_nclt_ground_truth(seq, NCLT_DIR)
+    poses, scan_files = load_nclt_ground_truth(seq, NCLT_DIR, selected_indices=selected_indices)
     return scan_files, poses, np.eye(4)
 
 def load_mulran_ouster(filepath):
@@ -294,7 +350,7 @@ def _load_mulran_ouster_timestamps(data_stamp_file):
     return np.array(ouster_ts, dtype=np.int64)
 
 
-def load_mulran_ground_truth(seq, mulran_dir):
+def load_mulran_ground_truth(seq, mulran_dir, selected_indices=None):
     """
     Load MulRan GT poses, one per Ouster scan.
 
@@ -340,8 +396,20 @@ def load_mulran_ground_truth(seq, mulran_dir):
         raise RuntimeError(f'No MulRan Ouster scans found for seq {seq}')
 
     T_base_ouster = _mulran_base_to_ouster_transform()
-    poses_world_ouster = []
     pose_ts_arr = np.asarray(pose_ts)
+
+    if selected_indices is not None:
+        wanted_indices = sorted({int(idx) for idx in selected_indices})
+        poses_world_ouster = {}
+        for idx in wanted_indices:
+            ts = scan_ts[idx]
+            nearest_idx = int(np.argmin(np.abs(pose_ts_arr - ts)))
+            poses_world_ouster[idx] = poses_world_base[nearest_idx] @ T_base_ouster
+
+        print(f'Loaded {len(poses_world_ouster)} MulRan poses for seq {seq} ')
+        return poses_world_ouster, scan_files
+
+    poses_world_ouster = []
     for ts in scan_ts:
         nearest_idx = int(np.argmin(np.abs(pose_ts_arr - ts)))
         poses_world_ouster.append(poses_world_base[nearest_idx] @ T_base_ouster)
@@ -350,14 +418,14 @@ def load_mulran_ground_truth(seq, mulran_dir):
     return poses_world_ouster, scan_files
 
 
-def load_mulran_dataset(seq):
+def load_mulran_dataset(seq, selected_indices=None):
     """
     High-level loader for a MulRan sequence.
 
     Returns (scan_files, poses, eye(4)) — Tr=eye(4) because poses are converted
     to the Ouster sensor frame.
     """
-    poses, scan_files = load_mulran_ground_truth(seq, MULRAN_DIR)
+    poses, scan_files = load_mulran_ground_truth(seq, MULRAN_DIR, selected_indices=selected_indices)
     return scan_files, poses, np.eye(4)
 
 
@@ -498,7 +566,7 @@ def _load_oxford_slam_poses(slam_pose_file):
     return np.array(gt_ts, dtype=np.int64), gt_poses
 
 
-def load_oxford_ground_truth(seq, oxford_dir):
+def load_oxford_ground_truth(seq, oxford_dir, selected_indices=None):
     """
     Load Oxford GT poses, one per lidar-clouds scan.
 
@@ -548,8 +616,20 @@ def load_oxford_ground_truth(seq, oxford_dir):
 
     T_base_lidar = _oxford_base_to_lidar_transform()
 
-    poses = []
     gt_ts_arr = np.asarray(gt_ts, dtype=np.int64)
+
+    if selected_indices is not None:
+        wanted_indices = sorted({int(idx) for idx in selected_indices})
+        poses = {}
+        for idx in wanted_indices:
+            ts = scan_ts[idx]
+            nearest_idx = int(np.argmin(np.abs(gt_ts_arr - ts)))
+            poses[idx] = gt_poses[nearest_idx] @ T_base_lidar
+
+        print(f'Loaded {len(poses)} OXFORD poses for seq {seq} ')
+        return poses, scan_files
+
+    poses = []
     for ts in scan_ts:
         nearest_idx = int(np.argmin(np.abs(gt_ts_arr - ts)))
         poses.append(gt_poses[nearest_idx] @ T_base_lidar)
@@ -558,12 +638,12 @@ def load_oxford_ground_truth(seq, oxford_dir):
     return poses, scan_files
 
 
-def load_oxford_dataset(seq):
+def load_oxford_dataset(seq, selected_indices=None):
     """
     High-level loader for an Oxford sequence.
 
     Returns (scan_files, poses, eye(4)) — Tr=eye(4) because poses are provided
     in the lidar sensor frame.
     """
-    poses, scan_files = load_oxford_ground_truth(seq, OXFORD_DIR)
+    poses, scan_files = load_oxford_ground_truth(seq, OXFORD_DIR, selected_indices=selected_indices)
     return scan_files, poses, np.eye(4)

@@ -10,7 +10,11 @@ CONFIG=${CONFIG:-eval/config/KITTI.json}
 SEQ=${SEQ:-01}
 TEST_COUNT=${TEST_COUNT:-10}
 SEED=${SEED:-42}
-METHODS=(kiss mac teaser quatro)
+
+# TEST IF specified methods are build proprely
+# SETUP: Specify methods here
+METHODS=(macpp mac teaser quatro kiss gmor trde)
+# FasterPFH // FPFH // SHOT_PCL // STD
 
 all_ok=1
 for method in "${METHODS[@]}"; do
@@ -19,11 +23,11 @@ for method in "${METHODS[@]}"; do
       --config "$CONFIG" \
       --dataset KITTI \
       --seq "$SEQ" \
-      --feat FPFH \
+      --feat FPFH \ 
       --reg "$method" \
       --voxel_size 0.5 \
       --test_type random \
-      --dist_min 2 \
+      --dist_min 6 \
       --dist_max 12 \
       --test_count "$TEST_COUNT" \
       --seed "$SEED" >/dev/null; then
@@ -35,9 +39,9 @@ for method in "${METHODS[@]}"; do
 done
 
 if [[ "$all_ok" -eq 1 ]]; then
-  echo "ALL METHODS PASS: built succesfully"
+  echo "ALL METHODS PASS: built and inference succesfully"
   exit 0
 fi
 
-echo "SOME METHODS FAILED: check method-specific errors above."
+echo "SOME METHODS FAILED: check specific errors above."
 exit 1

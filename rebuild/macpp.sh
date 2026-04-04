@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
-MACPP_DIR="$REPO_ROOT/MAC-PLUS-PLUS"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MACPP_DIR="$REPO_ROOT/MACPP"
 MACPP_SRC_DIR="$MACPP_DIR/src"
 MACPP_BUILD_DIR="$MACPP_SRC_DIR/build"
 MACPP_PYBIND_DIR="$MACPP_SRC_DIR/pybind"
 MACPP_PYBIND_BUILD_DIR="$MACPP_SRC_DIR/build_pybind"
+
+# TODO: handle first install in init.sh
+# git clone https://github.com/zhangxy0517/MAC-PLUS-PLUS.git
 
 if [[ ! -d "$MACPP_DIR" ]]; then
   echo "[error] MAC++ directory not found: $MACPP_DIR"

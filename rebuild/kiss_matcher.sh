@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV_PYTHON="$REPO_ROOT/.venv2/bin/python3.12"
 BUILD_DIR="/tmp/km_build"
 

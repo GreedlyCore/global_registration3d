@@ -43,14 +43,18 @@ def eval_sequence(args, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     Returns:
         List of result rows (each row is a dict with metrics for one pair)
     """
-    # Load dataset
-    scan_files, poses, Tr, load_pcd, seq = load_dataset_loader(args.dataset, args.seq)
-    dataset = args.dataset.upper()
-    total_scans = len(scan_files)
-
-    # Generate pairs
     test_type = getattr(args, 'test_type', 'random')
-    pairs = generate_pairs(test_type, args, total_scans, poses, Tr)
+    dataset = args.dataset.upper()
+
+    if test_type == 'scan2scan':
+        pairs = generate_pairs(test_type, args, 0, None, None)
+        selected_indices = sorted({idx for pair in pairs for idx in pair})
+        scan_files, poses, Tr, load_pcd, seq = load_dataset_loader(
+            args.dataset, args.seq, selected_indices=selected_indices)
+    else:
+        scan_files, poses, Tr, load_pcd, seq = load_dataset_loader(args.dataset, args.seq)
+        total_scans = len(scan_files)
+        pairs = generate_pairs(test_type, args, total_scans, poses, Tr)
 
     csv_path = None
     if ENABLE_CSV_OUTPUT:
