@@ -114,6 +114,28 @@ def _import_gmor_trde_solver():
     return gmor_trde_solver
 
 
+def _import_std_solver():
+    """Import std_solver from the local eval path or build output."""
+    try:
+        import std_solver  # type: ignore
+        return std_solver
+    except Exception:
+        pass
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    candidate_py_dirs = [
+        os.path.join(repo_root, 'eval'),
+        os.path.join(repo_root, 'STD_REG', 'build_pybind'),
+    ]
+
+    for d in candidate_py_dirs:
+        if os.path.isdir(d) and d not in sys.path:
+            sys.path.insert(0, d)
+
+    import std_solver  # type: ignore
+    return std_solver
+
+
 def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
                      reg_method='teaser', feat_method='FPFH', corr_method='nn',
                      downsample_method='o3d',
@@ -139,6 +161,43 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         corr_stats : dict  keys 'n_corr_init', 'n_inliers', 'n_outliers'
     """
     timings = {}
+    
+    # fine for now ///
+    if feat_method == 'STD' or reg_method == 'STD':
+        std_solver = _import_std_solver()
+
+        src_np = np.asarray(src_pcd.points, dtype=np.float32)
+        tgt_np = np.asarray(tgt_pcd.points, dtype=np.float32)
+
+        cfg = std_solver.ConfigSetting()
+        cfg.ds_size_ = float(voxel_size)
+        cfg.voxel_size_ = float(voxel_size)
+
+        matcher = std_solver.STDescManager(cfg)
+        result = matcher.match_pairwise(src_np, tgt_np)
+
+        rot = np.asarray(result['transform_rotation'], dtype=np.float64)
+        trans = np.asarray(result['transform_translation'], dtype=np.float64)
+        if rot.shape != (3, 3):
+            rot = np.eye(3, dtype=np.float64)
+        if trans.shape != (3,):
+            trans = np.zeros(3, dtype=np.float64)
+        T_pred = Rt2T(rot, trans)
+
+        timings = {
+            'downsample': float(result['timings_ms'].get('downsample', 0.0)) / 1000.0,
+            'feature': float(result['timings_ms'].get('feature', 0.0)) / 1000.0,
+            'correspondence': float(result['timings_ms'].get('candidate', 0.0)) / 1000.0,
+            'registration': float(result['timings_ms'].get('registration', 0.0)) / 1000.0,
+        }
+
+        corr_count = len(result.get('correspondences', []))
+        corr_stats = {
+            'n_corr_init': corr_count,
+            'n_inliers': corr_count,
+            'n_outliers': 0,
+        }
+        return T_pred, timings, corr_stats
 
     # Full self-contained pipeline
     if reg_method == 'kiss':

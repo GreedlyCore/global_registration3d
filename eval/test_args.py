@@ -9,8 +9,8 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 from helpers import resolve_feature_cfg
 
 
-FEAT_METHOD_CHOICES = ("FPFH", "FPFH_PCL", "FasterPFH", "SHOT_PCL")
-REG_METHOD_CHOICES = ("teaser", "mac", "macpp", "quatro", "kiss", "gmor", "trde")
+FEAT_METHOD_CHOICES = ("FPFH", "FPFH_PCL", "FasterPFH", "SHOT_PCL", "STD")
+REG_METHOD_CHOICES = ("teaser", "mac", "macpp", "quatro", "kiss", "gmor", "trde", "STD")
 TEST_TYPE_CHOICES = ("random", "scan2scan")
 
 
