@@ -85,7 +85,7 @@ def _normalize_core_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _attach_run_metrics(df: pd.DataFrame) -> pd.DataFrame:
+def _attach_run_metrics(df: pd.DataFrame, input_base_dir: str = '') -> pd.DataFrame:
     out = df.copy()
     if 'csv_path' not in out.columns:
         out['rre_deg'] = np.nan
@@ -93,7 +93,7 @@ def _attach_run_metrics(df: pd.DataFrame) -> pd.DataFrame:
         out['run_time_s'] = np.nan
         return out
 
-    cache = build_run_cache(out['csv_path'].dropna().astype(str).tolist())
+    cache = build_run_cache(out['csv_path'].dropna().astype(str).tolist(), base_dir=input_base_dir)
     rre_vals: List[float] = []
     rte_vals: List[float] = []
     time_vals: List[float] = []
@@ -169,7 +169,9 @@ def build_metrics_summary_table(df: pd.DataFrame, target_dist_tag: str) -> pd.Da
 
     if target_dist_tag:
         norm = target_dist_tag.strip().replace('-', '_').replace('~', '_')
-        work = work[work['dist_tag_norm'] == norm]
+        filtered = work[work['dist_tag_norm'] == norm]
+        if not filtered.empty:
+            work = filtered
 
     if work.empty:
         raise RuntimeError('No rows available after applying target distance-bin filter')
@@ -236,7 +238,7 @@ def main() -> None:
         raise RuntimeError('Input CSV has no rows')
 
     df = _normalize_core_columns(raw_df)
-    df = _attach_run_metrics(df)
+    df = _attach_run_metrics(df, input_base_dir=os.path.dirname(os.path.abspath(args.input_csv)))
 
     # Table-1: scene x dist SR table.
     if {'scene', 'dist_tag_norm'}.issubset(df.columns) and df['scene'].str.len().gt(0).any():

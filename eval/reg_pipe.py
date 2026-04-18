@@ -29,6 +29,52 @@ from helpers_graph import (
     graph_stats_teaser_solver,
 )
 
+
+# TODO: remove
+def _identity_result(timings, n_corr_init=0):
+    """Return a safe fallback result when feature/correspondence data is unusable."""
+    timings.setdefault('registration', 0.0)
+    return (
+        np.eye(4, dtype=np.float64),
+        timings,
+        {
+            'n_corr_init': int(n_corr_init),
+            'n_inliers': 0,
+            'n_outliers': int(n_corr_init),
+        },
+    )
+
+# TODO: remove
+def _sanitize_feature_outputs(xyz, feats):
+    """Drop non-finite descriptor rows and keep xyz/feature arrays aligned."""
+    xyz = np.asarray(xyz, dtype=np.float64)
+    feats = np.asarray(feats, dtype=np.float32)
+
+    if xyz.ndim != 2 or feats.ndim != 2:
+        return np.empty((3, 0), dtype=np.float64), np.empty((0, 0), dtype=np.float32)
+
+    if xyz.shape[0] != 3 and xyz.shape[1] == 3:
+        xyz = xyz.T
+
+    if xyz.shape[0] != 3:
+        return np.empty((3, 0), dtype=np.float64), np.empty((0, feats.shape[1]), dtype=np.float32)
+
+    n = min(xyz.shape[1], feats.shape[0])
+    if n <= 0:
+        return np.empty((3, 0), dtype=np.float64), np.empty((0, feats.shape[1]), dtype=np.float32)
+
+    xyz = xyz[:, :n]
+    feats = feats[:n, :]
+
+    finite_xyz = np.all(np.isfinite(xyz.T), axis=1)
+    finite_feats = np.all(np.isfinite(feats), axis=1)
+    mask = finite_xyz & finite_feats
+
+    if not np.any(mask):
+        return np.empty((3, 0), dtype=np.float64), np.empty((0, feats.shape[1]), dtype=np.float32)
+
+    return xyz[:, mask], feats[mask, :]
+
 def _downsample_tbb(pcd, voxel_size):
     """Downsample an open3d PointCloud using kiss_matcher TBB VoxelgridSampling."""
     from kiss_matcher._kiss_matcher import voxelgrid_sampling
@@ -302,7 +348,13 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
         tgt_xyz = pcd2xyz(tgt_ds)
         src_feats = extract_fpfh(src_ds, voxel_size)   # (N, 33)
         tgt_feats = extract_fpfh(tgt_ds, voxel_size)
+
+    src_xyz, src_feats = _sanitize_feature_outputs(src_xyz, src_feats)
+    tgt_xyz, tgt_feats = _sanitize_feature_outputs(tgt_xyz, tgt_feats)
     timings['feature'] = time.time() - t0
+
+    if src_feats.shape[0] == 0 or tgt_feats.shape[0] == 0:
+        return _identity_result(timings, n_corr_init=0)
 
     # Correspondences
     t0 = time.time()
@@ -310,7 +362,19 @@ def run_registration(src_pcd, tgt_pcd, voxel_size=0.5,
     corrs_src, corrs_tgt = find_correspondences(src_feats, tgt_feats, mutual_filter=True)
     src_corr = src_xyz[:, corrs_src]   # (3, K)
     tgt_corr = tgt_xyz[:, corrs_tgt]   # (3, K)
+
+    if src_corr.size == 0 or tgt_corr.size == 0:
+        timings['correspondence'] = time.time() - t0
+        return _identity_result(timings, n_corr_init=0)
+
+    finite_corr_mask = np.all(np.isfinite(src_corr.T), axis=1) & np.all(np.isfinite(tgt_corr.T), axis=1)
+    src_corr = src_corr[:, finite_corr_mask]
+    tgt_corr = tgt_corr[:, finite_corr_mask]
     timings['correspondence'] = time.time() - t0
+
+    min_corr_required = 3
+    if src_corr.shape[1] < min_corr_required:
+        return _identity_result(timings, n_corr_init=src_corr.shape[1])
 
     # Registration
     t0 = time.time()

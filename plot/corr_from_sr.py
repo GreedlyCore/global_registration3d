@@ -56,7 +56,7 @@ def _normalize_input(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _attach_corr_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _attach_corr_columns(df: pd.DataFrame, input_base_dir: str = '') -> pd.DataFrame:
     out = df.copy()
 
     has_direct = all(col in out.columns for col in ('n_inliers', 'n_outliers'))
@@ -74,7 +74,7 @@ def _attach_corr_columns(df: pd.DataFrame) -> pd.DataFrame:
             'Input CSV has no n_inliers/n_outliers columns and no csv_path for run-level extraction'
         )
 
-    cache = build_run_cache(out['csv_path'].dropna().astype(str).tolist())
+    cache = build_run_cache(out['csv_path'].dropna().astype(str).tolist(), base_dir=input_base_dir)
     inliers: List[float] = []
     outliers: List[float] = []
     corr_init: List[float] = []
@@ -95,7 +95,7 @@ def _aggregate_dataset_method(df: pd.DataFrame) -> pd.DataFrame:
     work = df.copy()
     work['ratio_percent'] = np.where(
         (work['n_inliers_val'] + work['n_outliers_val']) > 0,
-        100.0 * work['n_inliers_val'] / (work['n_inliers_val'] + work['n_outliers_val']),
+        100.0 * work['n_outliers_val'] / (work['n_inliers_val'] + work['n_outliers_val']),
         np.nan,
     )
 
@@ -139,7 +139,7 @@ def _plot_metric(ax, summary: pd.DataFrame, metric: str, title: str, xlabel: str
 
 
 def _print_summary(summary: pd.DataFrame, labels: Dict[str, str]) -> None:
-    print(f"{tr(labels, 'title_average_inliers')} / {tr(labels, 'title_average_outliers')} / {tr(labels, 'title_ratio')}")
+    print(f"{tr(labels, 'title_average_inliers')} / {tr(labels, 'title_average_outliers')} / {tr(labels, 'title_outlier_ratio')}")
     printable = summary.copy()
     printable = printable[['dataset', 'method_label', 'n_inliers_val', 'n_outliers_val', 'ratio_percent']]
     printable = printable.rename(
@@ -148,7 +148,7 @@ def _print_summary(summary: pd.DataFrame, labels: Dict[str, str]) -> None:
             'method_label': 'method',
             'n_inliers_val': 'avg_inliers',
             'n_outliers_val': 'avg_outliers',
-            'ratio_percent': 'inlier_ratio_percent',
+            'ratio_percent': 'outlier_ratio_percent',
         }
     )
     print(printable.to_string(index=False, float_format=lambda x: f'{x:.3f}'))
@@ -169,7 +169,7 @@ def main() -> None:
         raise RuntimeError('Input CSV has no rows')
 
     df = _normalize_input(raw)
-    df = _attach_corr_columns(df)
+    df = _attach_corr_columns(df, input_base_dir=os.path.dirname(os.path.abspath(args.input_csv)))
     summary = _aggregate_dataset_method(df)
     if summary.empty:
         raise RuntimeError('No correspondence metrics could be aggregated')
@@ -186,11 +186,11 @@ def main() -> None:
     fig, axes = plt.subplots(1, 3, figsize=(16, 5.2), sharey=True)
     _plot_metric(axes[0], summary, 'n_inliers_val', tr(labels, 'title_average_inliers'), tr(labels, 'ylabel_average_inliers'))
     _plot_metric(axes[1], summary, 'n_outliers_val', tr(labels, 'title_average_outliers'), tr(labels, 'ylabel_average_outliers'))
-    _plot_metric(axes[2], summary, 'ratio_percent', tr(labels, 'title_ratio'), tr(labels, 'ylabel_ratio'))
+    _plot_metric(axes[2], summary, 'ratio_percent', tr(labels, 'title_outlier_ratio'), tr(labels, 'ylabel_outlier_ratio'))
 
-    handles, labels = axes[2].get_legend_handles_labels()
+    handles, legend_labels = axes[2].get_legend_handles_labels()
     if handles:
-        fig.legend(handles, labels, loc='upper center', ncol=max(1, len(labels)), frameon=False)
+        fig.legend(handles, legend_labels, loc='upper center', ncol=max(1, len(legend_labels)), frameon=False)
     plt.tight_layout(rect=[0, 0, 1, 0.92])
     fig.savefig(out_png, dpi=180)
     plt.close(fig)

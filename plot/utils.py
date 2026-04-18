@@ -187,11 +187,40 @@ def analyze_run_csv(run_csv: str) -> Dict[str, float]:
     return stats
 
 
-def build_run_cache(csv_paths: Iterable[str]) -> Dict[str, Dict[str, float]]:
+def build_run_cache(csv_paths: Iterable[str], base_dir: str = '') -> Dict[str, Dict[str, float]]:
     cache: Dict[str, Dict[str, float]] = {}
+    base_dir_clean = str(base_dir or '').strip()
+
+    def _resolve_run_csv(path: str) -> str:
+        candidate = str(path).strip()
+        if not candidate:
+            return candidate
+        if os.path.isfile(candidate):
+            return candidate
+
+        if base_dir_clean and (not os.path.isabs(candidate)):
+            from_input_dir = os.path.normpath(os.path.join(base_dir_clean, candidate))
+            if os.path.isfile(from_input_dir):
+                return from_input_dir
+
+            # Probe ancestors of base_dir to support repo-root-relative paths
+            # such as "results/..." when input CSV lives in a nested folder.
+            probe_dir = os.path.normpath(base_dir_clean)
+            while True:
+                from_ancestor = os.path.normpath(os.path.join(probe_dir, candidate))
+                if os.path.isfile(from_ancestor):
+                    return from_ancestor
+                parent = os.path.dirname(probe_dir)
+                if not parent or parent == probe_dir:
+                    break
+                probe_dir = parent
+
+        return candidate
+
     for path in csv_paths:
         clean = str(path).strip()
         if not clean or clean in cache:
             continue
-        cache[clean] = analyze_run_csv(clean)
+        resolved = _resolve_run_csv(clean)
+        cache[clean] = analyze_run_csv(resolved)
     return cache

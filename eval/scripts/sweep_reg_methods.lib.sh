@@ -20,12 +20,19 @@ declare -A DATASET_SEQ_VARS=(
 RUNS_DIR="$BASE_OUT/runs"
 OVERALL_DIR="$BASE_OUT/overall"
 GENERATED_SEQ_JSON="$BASE_OUT/generated_sequences.json"
-SCAN2SCAN_CFG_DIR="$BASE_OUT/generated_eval_configs"
+SCAN2SCAN_CFG_DIR="$BASE_OUT/generated_scan2scan_configs"
 DETAIL_CSV="$BASE_OUT/overall_detail.csv"
+TEST_TYPE=${TEST_TYPE:-scan2scan}
+MAP_PREV_SCANS=${MAP_PREV_SCANS:-5}
 TOTAL_RUNS=0
 COMPLETED_RUNS=0
 
 validate_env() {
+  if [[ "$TEST_TYPE" != "scan2scan" && "$TEST_TYPE" != "scan2map" ]]; then
+    echo "[error] TEST_TYPE must be one of: scan2scan, scan2map" >&2
+    exit 1
+  fi
+
   if [[ -z "${VIRTUAL_ENV:-}" && -f "$PWD/.venv2/bin/activate" ]]; then
     source "$PWD/.venv2/bin/activate"
   fi
@@ -63,17 +70,7 @@ validate_env() {
   done
 
   mkdir -p "$RUNS_DIR" "$OVERALL_DIR" "$SCAN2SCAN_CFG_DIR"
-  if [[ "$EVAL_TEST_TYPE" != "scan2scan" && "$EVAL_TEST_TYPE" != "scan2map" ]]; then
-    echo "[error] EVAL_TEST_TYPE must be one of: scan2scan, scan2map" >&2
-    exit 1
-  fi
-
-  if [[ "$MAP_PREV_SCANS" -lt 0 ]]; then
-    echo "[error] MAP_PREV_SCANS must be >= 0" >&2
-    exit 1
-  fi
-
-  echo "dataset,scene,test_type,map_prev_scans,method,feat,dist_min,dist_max,dist_tag,test_count,seed,voxel_size,alpha,beta,rnormal,rFPFH,sr_percent,time_s,csv_path" > "$DETAIL_CSV"
+  echo "dataset,scene,method,feat,dist_min,dist_max,dist_tag,test_count,seed,voxel_size,alpha,beta,rnormal,rFPFH,sr_percent,time_s,csv_path" > "$DETAIL_CSV"
 }
 
 load_matrix() {
@@ -145,7 +142,7 @@ extract_summary_values() {
     }
     pair_idx && $pair_idx == "SUMMARY" {
       sr = (sr_idx ? $sr_idx : "nan")
-      tm = (time_idx ? time_idx : "nan")
+      tm = (time_idx ? $time_idx : "nan")
       gsub(/\r/, "", sr)
       gsub(/\r/, "", tm)
       print sr "," tm
@@ -172,7 +169,7 @@ build_scan2scan_config() {
     --scene "$scene" \
     --dist_tag "$dtag" \
     --out_cfg "$out_cfg" \
-    --mode "$EVAL_TEST_TYPE" \
+    --mode "$TEST_TYPE" \
     --map_prev_scans "$MAP_PREV_SCANS"
 }
 
@@ -207,9 +204,7 @@ generate_pairs() {
     --oxford_seqs "${oxford_seqs[@]}" \
     --dist_mins "${DIST_MINS[@]}" \
     --dist_maxs "${DIST_MAXS[@]}" \
-    --dist_tags "${DIST_TAGS[@]}" \
-    $( [[ "$EVAL_TEST_TYPE" == "scan2map" ]] && echo --emit_scan2map ) \
-    --map_prev_scans "$MAP_PREV_SCANS"
+    --dist_tags "${DIST_TAGS[@]}"
 }
 
 prepare_configs() {
@@ -222,7 +217,7 @@ prepare_configs() {
       local -n seqs_ref="$seq_var_name"
 
       for scene in "${seqs_ref[@]}"; do
-        out_cfg="$SCAN2SCAN_CFG_DIR/${EVAL_TEST_TYPE}_${dataset,,}_${scene,,}_d${dtag}.json"
+        out_cfg="$SCAN2SCAN_CFG_DIR/${dataset,,}_${scene,,}_d${dtag}.json"
         if [[ ! -f "$out_cfg" ]]; then
           build_scan2scan_config "$config_path" "${DATASET_LABELS[$dataset]}" "$scene" "$dtag" "$out_cfg"
         fi
@@ -249,7 +244,7 @@ run_one() {
   local run_cfg
   rnormal=$(awk -v a="$alpha" -v v="$voxel" 'BEGIN{printf "%.6f", a*v}')
   rFPFH=$(awk -v b="$beta" -v v="$voxel" 'BEGIN{printf "%.6f", b*v}')
-  run_cfg="$SCAN2SCAN_CFG_DIR/${EVAL_TEST_TYPE}_${dataset,,}_${scene,,}_d${dtag}.json"
+  run_cfg="$SCAN2SCAN_CFG_DIR/${dataset,,}_${scene,,}_d${dtag}.json"
   if [[ ! -f "$run_cfg" ]]; then
     build_scan2scan_config "$base_cfg" "$dataset" "$scene" "$dtag" "$run_cfg"
   fi
@@ -257,23 +252,48 @@ run_one() {
   local run_out="$RUNS_DIR/${method}/${feat}/v${voxel}_a${alpha}_b${beta}/${dataset,,}_${scene,,}/d${dtag}"
   mkdir -p "$run_out"
 
-  "$PYTHON_BIN" eval/test.py \
-    --config "$run_cfg" \
-    --dataset "$dataset" \
-    --seq "$scene" \
-    --feat "$feat" \
-    --reg "$method" \
-    --test_type "$EVAL_TEST_TYPE" \
-    --map_prev_scans "$MAP_PREV_SCANS" \
-    --seed "$SEED" \
-    --voxel_size "$voxel" \
-    --rnormal "$rnormal" \
-    --rFPFH "$rFPFH" \
-    --out_dir "$run_out"
+  # SHOT emits many per-point warnings from PCL internals; allow optional stderr filtering.
+  local shot_warn_filter_regex='^\[pcl::SHOTEstimation::(createBinDistanceShape|computeFeature)\]'
+  if [[ "$feat" == "SHOT_PCL" && "${QUIET_SHOT_WARNINGS:-0}" == "1" ]]; then
+    set +e
+    "$PYTHON_BIN" eval/test.py \
+      --config "$run_cfg" \
+      --dataset "$dataset" \
+      --seq "$scene" \
+      --feat "$feat" \
+      --reg "$method" \
+      --test_type "$TEST_TYPE" \
+      --map_prev_scans "$MAP_PREV_SCANS" \
+      --seed "$SEED" \
+      --voxel_size "$voxel" \
+      --rnormal "$rnormal" \
+      --rFPFH "$rFPFH" \
+      --out_dir "$run_out" \
+      2> >(grep -Ev "$shot_warn_filter_regex" >&2)
+    local run_rc=$?
+    set -e
+    if [[ "$run_rc" -ne 0 ]]; then
+      return "$run_rc"
+    fi
+  else
+    "$PYTHON_BIN" eval/test.py \
+      --config "$run_cfg" \
+      --dataset "$dataset" \
+      --seq "$scene" \
+      --feat "$feat" \
+      --reg "$method" \
+      --test_type "$TEST_TYPE" \
+      --map_prev_scans "$MAP_PREV_SCANS" \
+      --seed "$SEED" \
+      --voxel_size "$voxel" \
+      --rnormal "$rnormal" \
+      --rFPFH "$rFPFH" \
+      --out_dir "$run_out"
+  fi
 
   local method_lc="${method,,}"
   local csv_path
-  csv_path=$(find "$run_out" -type f -name "*_${EVAL_TEST_TYPE}_*_${method_lc}.csv" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)
+  csv_path=$(find "$run_out" -type f -name "*_${TEST_TYPE}_*_${method_lc}.csv" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)
 
   local stats
   local sr
@@ -282,7 +302,7 @@ run_one() {
   sr=${stats%,*}
   tm=${stats#*,}
 
-  echo "$dataset,$scene,$EVAL_TEST_TYPE,$MAP_PREV_SCANS,$method,$feat,$dmin,$dmax,$dtag,$TEST_COUNT,$SEED,$voxel,$alpha,$beta,$rnormal,$rFPFH,$sr,$tm,$csv_path" >> "$DETAIL_CSV"
+  echo "$dataset,$scene,$method,$feat,$dmin,$dmax,$dtag,$TEST_COUNT,$SEED,$voxel,$alpha,$beta,$rnormal,$rFPFH,$sr,$tm,$csv_path" >> "$DETAIL_CSV"
   progress_tick
 }
 
