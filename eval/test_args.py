@@ -11,7 +11,7 @@ from helpers import resolve_feature_cfg
 
 FEAT_METHOD_CHOICES = ("FPFH", "FPFH_PCL", "FasterPFH", "SHOT_PCL", "STD")
 REG_METHOD_CHOICES = ("teaser", "mac", "macpp", "quatro", "kiss", "gmor", "trde", "STD")
-TEST_TYPE_CHOICES = ("random", "scan2scan")
+TEST_TYPE_CHOICES = ("random", "scan2scan", "scan2map")
 
 
 def load_config_from_argv(argv: Optional[Sequence[str]] = None) -> Dict[str, Any]:
@@ -55,6 +55,11 @@ def build_parser(cfg: Dict[str, Any]) -> argparse.ArgumentParser:
         default=cfg.get("test_type", "random"),
         choices=TEST_TYPE_CHOICES,
     )
+    parser.add_argument(
+        "--map_prev_scans",
+        type=int,
+        default=cfg.get("map_prev_scans", 5),
+    )
     return parser
 
 
@@ -78,9 +83,18 @@ def finalize_args(
         args.feat_cfg["rFPFH"] = float(args.rFPFH)
 
     args.test_scans = cfg.get("test_scans", [])
+    args.test_scan2map = cfg.get("test_scan2map", [])
 
     if args.test_type == "random" and (args.dist_min is None or args.dist_max is None):
         parser.error("random mode requires both --dist_min and --dist_max (in meters)")
+
+    if args.test_type == "scan2map" and not args.test_scan2map and not args.test_scans:
+        parser.error(
+            'scan2map mode requires "test_scan2map" (preferred) or "test_scans" in config'
+        )
+
+    if args.map_prev_scans < 0:
+        parser.error("--map_prev_scans must be >= 0")
 
     return args
 

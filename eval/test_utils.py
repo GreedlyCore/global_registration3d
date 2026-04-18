@@ -209,6 +209,10 @@ def merge_cli_with_json_config(json_cfg: Dict[str, Any], args: argparse.Namespac
         merged['feat_cfg'] = args.feat_cfg
     if args.test_scans:
         merged['test_scans'] = args.test_scans
+    if getattr(args, 'test_scan2map', None):
+        merged['test_scan2map'] = args.test_scan2map
+    if getattr(args, 'map_prev_scans', None) is not None:
+        merged['map_prev_scans'] = args.map_prev_scans
     
     return merged
 

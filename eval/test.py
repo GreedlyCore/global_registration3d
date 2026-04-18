@@ -12,9 +12,11 @@ import os
 import csv
 import json
 import logging
+import copy
 from typing import List, Dict, Any
 
 import numpy as np
+import open3d as o3d
 from tqdm import tqdm
 
 from test_utils import (
@@ -51,6 +53,43 @@ def eval_sequence(args, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         selected_indices = sorted({idx for pair in pairs for idx in pair})
         scan_files, poses, Tr, load_pcd, seq = load_dataset_loader(
             args.dataset, args.seq, selected_indices=selected_indices)
+    elif test_type == 'scan2map':
+        map_entries_cfg = getattr(args, 'test_scan2map', []) or []
+        if map_entries_cfg:
+            map_entries = []
+            for entry in map_entries_cfg:
+                src_idx = int(entry['src'])
+                tgt_idx = int(entry['tgt'])
+                src_map = [int(i) for i in entry.get('src_map', [])]
+                if not src_map:
+                    src_map = [src_idx]
+                map_entries.append({'src': src_idx, 'tgt': tgt_idx, 'src_map': src_map})
+        else:
+            # Backward-compatible fallback if only test_scans exist in config.
+            pairs = generate_pairs('scan2scan', args, 0, None, None)
+            map_entries = []
+            for src_idx, tgt_idx in pairs:
+                start = max(0, int(src_idx) - int(args.map_prev_scans))
+                map_entries.append({
+                    'src': int(src_idx),
+                    'tgt': int(tgt_idx),
+                    'src_map': list(range(start, int(src_idx) + 1)),
+                })
+
+        selected_indices = sorted(
+            {
+                int(e['tgt'])
+                for e in map_entries
+            }.union(
+                {
+                    int(i)
+                    for e in map_entries
+                    for i in e['src_map']
+                }
+            )
+        )
+        scan_files, poses, Tr, load_pcd, seq = load_dataset_loader(
+            args.dataset, args.seq, selected_indices=selected_indices)
     else:
         scan_files, poses, Tr, load_pcd, seq = load_dataset_loader(args.dataset, args.seq)
         total_scans = len(scan_files)
@@ -84,12 +123,27 @@ def eval_sequence(args, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         writer.writeheader()
 
     # Process each pair
-    for pair_id, (src_idx, tgt_idx) in enumerate(tqdm(pairs, desc=f'{dataset} {seq}')):
-        # Load point clouds
-        src_pcd = load_pcd(scan_files[src_idx])
+    if test_type == 'scan2map':
+        iterator = ((i, e['src'], e['tgt'], e['src_map']) for i, e in enumerate(map_entries))
+    else:
+        iterator = ((i, s, t, None) for i, (s, t) in enumerate(pairs))
+
+    for pair_id, src_idx, tgt_idx, src_map_indices in tqdm(iterator, desc=f'{dataset} {seq}'):
         tgt_pcd = load_pcd(scan_files[tgt_idx])
 
-        # Ground-truth transform
+        if test_type == 'scan2map':
+            src_pcd = o3d.geometry.PointCloud()
+            for map_idx in src_map_indices or [src_idx]:
+                pcd_i = load_pcd(scan_files[map_idx])
+                if map_idx != src_idx:
+                    T_i_to_src = gt_transform(poses, Tr, map_idx, src_idx)
+                    pcd_i = copy.deepcopy(pcd_i)
+                    pcd_i.transform(T_i_to_src)
+                src_pcd += pcd_i
+        else:
+            src_pcd = load_pcd(scan_files[src_idx])
+
+        # Ground-truth transform is anchored at src_idx (map reference frame in scan2map)
         T_gt = gt_transform(poses, Tr, src_idx, tgt_idx)
 
         # Run registration
@@ -160,7 +214,11 @@ def eval_sequence(args, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
     mode_info = (
         f'dist_range=[{args.dist_min},{args.dist_max}]m'
         if test_type == 'random'
-        else f'scan2scan({len(pairs)} pairs)'
+        else (
+            f'scan2scan({len(pairs)} pairs)'
+            if test_type == 'scan2scan'
+            else f'scan2map({len(map_entries)} maps, prev={args.map_prev_scans})'
+        )
     )
     logging.info(
         f"[{dataset}] Seq {seq} | {mode_info} | {args.feat}+{args.reg} | N={len(rows)}")
@@ -186,6 +244,8 @@ if __name__ == '__main__':
         os.makedirs('logs', exist_ok=True)
         if args.test_type == 'random':
             dist_tag = f"d{args.dist_min:g}_{args.dist_max:g}"
+        elif args.test_type == 'scan2map':
+            dist_tag = 'scan2map'
         else:
             dist_tag = 'scan2scan'
         tag = f"{args.dataset.lower()}_{args.seq}_{dist_tag}_{args.feat}_{args.reg}"

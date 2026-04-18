@@ -30,4 +30,4 @@ TEASER-plusplus/
 eval/*.so
 
 # TODO: remove later, after writing a better README
-*.md
+docs/

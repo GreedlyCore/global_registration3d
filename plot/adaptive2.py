@@ -1,101 +1,91 @@
-import os
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+import pandas as pd
 
 # Load data from JSON file
-
-with open(os.path.expanduser("~/thesis/global_registration3d/results/adaptive/adaptive_params.json"), 'r') as f:
+with open('/home/sonieth3/thesis/global_registration3d/results/adaptive/adaptive_params.json', 'r') as f:
     data = json.load(f)
 
-# Extract data separately for KITTI and MulRan
-kitti_voxel = []
-kitti_r_local = []
-kitti_r_middle = []
-kitti_r_global = []
-
-mulran_voxel = []
-mulran_r_local = []
-mulran_r_middle = []
-mulran_r_global = []
+# Extract scenes and parameters
+scenes = []
+voxel_means = []
+r_local_means = []
+r_middle_means = []
+r_global_means = []
 
 for dataset_name, dataset_content in data.items():
-    if dataset_name == "OXFORD" or not dataset_content:
-        continue
-    
+    if dataset_name == "OXFORD" and not dataset_content:
+        continue  # Skip empty Oxford
     for scene_name, scene_data in dataset_content.items():
-        if dataset_name == "KITTI":
-            kitti_voxel.append(scene_data['voxel_size_mean'])
-            kitti_r_local.append(scene_data['r_local_mean'])
-            kitti_r_middle.append(scene_data['r_middle_mean'])
-            kitti_r_global.append(scene_data['r_global_mean'])
-        elif dataset_name == "MulRan":
-            mulran_voxel.append(scene_data['voxel_size_mean'])
-            mulran_r_local.append(scene_data['r_local_mean'])
-            mulran_r_middle.append(scene_data['r_middle_mean'])
-            mulran_r_global.append(scene_data['r_global_mean'])
+        scenes.append(f"{dataset_name}{scene_name}")
+        voxel_means.append(scene_data['voxel_size_mean'])
+        r_local_means.append(scene_data['r_local_mean'])
+        r_middle_means.append(scene_data['r_middle_mean'])
+        r_global_means.append(scene_data['r_global_mean'])
 
-# Create figure with 2x2 subplots
-fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-fig.suptitle('Parameter Distribution: KITTI vs MulRan', fontsize=14, fontweight='bold')
+# Normalize data for radar chart (min-max scaling)
+def normalize(data):
+    return (data - np.min(data)) / (np.max(data) - np.min(data))
 
-# 1. Voxel Size
-data_voxel = [kitti_voxel, mulran_voxel]
-bp1 = axes[0,0].boxplot(data_voxel, labels=['KITTI', 'MulRan'], 
-                         patch_artist=True, widths=0.6)
-bp1['boxes'][0].set_facecolor('lightblue')
-bp1['boxes'][1].set_facecolor('lightcoral')
-axes[0,0].set_ylabel('Voxel Size (m)', fontsize=11)
-axes[0,0].set_title('(a) $\\nu$ (Voxel Size)', fontsize=12)
-axes[0,0].grid(True, alpha=0.3, axis='y')
+voxel_norm = normalize(np.array(voxel_means))
+r_local_norm = normalize(np.array(r_local_means))
+r_middle_norm = normalize(np.array(r_middle_means))
+r_global_norm = normalize(np.array(r_global_means))
 
-# Add individual points
-for i, data in enumerate([kitti_voxel, mulran_voxel]):
-    x = np.random.normal(i+1, 0.04, size=len(data))
-    axes[0,0].scatter(x, data, alpha=0.6, color='black', s=30)
+# Prepare data for radar
+metrics = ['$\\nu$ ', '$r_{loc}$', '$r_{mid}$', '$r_{global}$']
+num_vars = len(metrics)
 
-# 2. r_local
-data_r_local = [kitti_r_local, mulran_r_local]
-bp2 = axes[0,1].boxplot(data_r_local, labels=['KITTI', 'MulRan'], 
-                         patch_artist=True, widths=0.6)
-bp2['boxes'][0].set_facecolor('lightblue')
-bp2['boxes'][1].set_facecolor('lightcoral')
-axes[0,1].set_ylabel('Radius (m)', fontsize=11)
-axes[0,1].set_title('(b) $r_{local}$', fontsize=12)
-axes[0,1].grid(True, alpha=0.3, axis='y')
+# Create angles for radar chart
+angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+angles += angles[:1]  # Close the loop
 
-for i, data in enumerate([kitti_r_local, mulran_r_local]):
-    x = np.random.normal(i+1, 0.04, size=len(data))
-    axes[0,1].scatter(x, data, alpha=0.6, color='black', s=30)
+# Create figure
+fig, ax = plt.subplots(figsize=(12, 10), subplot_kw=dict(projection='polar'))
 
-# 3. r_middle
-data_r_middle = [kitti_r_middle, mulran_r_middle]
-bp3 = axes[1,0].boxplot(data_r_middle, labels=['KITTI', 'MulRan'], 
-                         patch_artist=True, widths=0.6)
-bp3['boxes'][0].set_facecolor('lightblue')
-bp3['boxes'][1].set_facecolor('lightcoral')
-axes[1,0].set_ylabel('Radius (m)', fontsize=11)
-axes[1,0].set_title('(c) $r_{middle}$', fontsize=12)
-axes[1,0].grid(True, alpha=0.3, axis='y')
+# Colors for different scenes
+colors = plt.cm.tab20(np.linspace(0, 1, len(scenes)))
 
-for i, data in enumerate([kitti_r_middle, mulran_r_middle]):
-    x = np.random.normal(i+1, 0.04, size=len(data))
-    axes[1,0].scatter(x, data, alpha=0.6, color='black', s=30)
+# Plot each scene
+for idx, scene in enumerate(scenes):
+    values = [voxel_norm[idx], r_local_norm[idx], r_middle_norm[idx], r_global_norm[idx]]
+    values += values[:1]  # Close the loop
+    
+    ax.plot(angles, values, 'o-', linewidth=1.5, 
+            color=colors[idx], label=scene, alpha=0.7)
+    ax.fill(angles, values, alpha=0.1, color=colors[idx])
 
-# 4. r_global
-data_r_global = [kitti_r_global, mulran_r_global]
-bp4 = axes[1,1].boxplot(data_r_global, labels=['KITTI', 'MulRan'], 
-                         patch_artist=True, widths=0.6)
-bp4['boxes'][0].set_facecolor('lightblue')
-bp4['boxes'][1].set_facecolor('lightcoral')
-axes[1,1].set_ylabel('Radius (m)', fontsize=11)
-axes[1,1].set_title('(d) $r_{global}$', fontsize=12)
-axes[1,1].grid(True, alpha=0.3, axis='y')
+# Set labels with LaTeX
+ax.set_xticks(angles[:-1])
+ax.set_xticklabels(metrics, fontsize=12)
+ax.set_ylim(0, 1)
+ax.set_yticks([0.25, 0.5, 0.75, 1.0])
+ax.set_yticklabels(['0.25', '0.50', '0.75', '1.00'], fontsize=10)
+# ax.set_ylabel('Normalized Value', fontsize=10, labelpad=20)
+# ax.set_title('Parameter Comparison Across Scenes', 
+#              fontsize=14, fontweight='bold', pad=20)
 
-for i, data in enumerate([kitti_r_global, mulran_r_global]):
-    x = np.random.normal(i+1, 0.04, size=len(data))
-    axes[1,1].scatter(x, data, alpha=0.6, color='black', s=30)
+# Add legend
+ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0), 
+          fontsize=9, framealpha=0.9)
+
+# Add grid
+ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('boxplots_kitti_vs_mulran.pdf', dpi=300, bbox_inches='tight')
+plt.savefig('radar_chart_params.pdf', dpi=300, bbox_inches='tight')
 plt.show()
+
+# Optional: Print summary statistics
+print("\n=== Summary Statistics ===")
+print(f"Scenes analyzed: {len(scenes)}")
+print("\nVoxel size ($\\nu$) range: {:.3f} - {:.3f} m".format(
+    min(voxel_means), max(voxel_means)))
+print("$r_{loc}$ range: {:.3f} - {:.3f} m".format(
+    min(r_local_means), max(r_local_means)))
+print("$r_{mid}$ range: {:.3f} - {:.3f} m".format(
+    min(r_middle_means), max(r_middle_means)))
+print("$r_{global}$ range: {:.3f} - {:.3f} m".format(
+    min(r_global_means), max(r_global_means)))

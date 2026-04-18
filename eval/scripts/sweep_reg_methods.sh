@@ -41,6 +41,10 @@ GRID_BETA_RATIOS=(${GRID_BETA_RATIOS:-5.0})
 # Pairwise for anything else
 PARAM_SWEEP_MODE=${PARAM_SWEEP_MODE:-grid}  # pairwise | grid
 
+# Eval mode: scan2scan | scan2map
+EVAL_TEST_TYPE=${EVAL_TEST_TYPE:-scan2scan}
+MAP_PREV_SCANS=${MAP_PREV_SCANS:-5}
+
 
 if [[ "$PARAM_SWEEP_MODE" != "pairwise" && "$PARAM_SWEEP_MODE" != "grid" ]]; then
   echo "[error] PARAM_SWEEP_MODE must be one of: pairwise, grid" >&2
@@ -98,7 +102,7 @@ DIST_TAGS=("2_6" "6_10" "10_12" "15_20")
 RUNS_DIR="$BASE_OUT/runs"
 OVERALL_DIR="$BASE_OUT/overall"
 GENERATED_SEQ_JSON="$BASE_OUT/generated_sequences.json"
-SCAN2SCAN_CFG_DIR="$BASE_OUT/generated_scan2scan_configs"
+SCAN2SCAN_CFG_DIR="$BASE_OUT/generated_eval_configs"
 mkdir -p "$RUNS_DIR" "$OVERALL_DIR"
 mkdir -p "$SCAN2SCAN_CFG_DIR"
 

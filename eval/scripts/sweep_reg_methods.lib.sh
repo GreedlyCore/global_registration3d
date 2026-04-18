@@ -20,7 +20,7 @@ declare -A DATASET_SEQ_VARS=(
 RUNS_DIR="$BASE_OUT/runs"
 OVERALL_DIR="$BASE_OUT/overall"
 GENERATED_SEQ_JSON="$BASE_OUT/generated_sequences.json"
-SCAN2SCAN_CFG_DIR="$BASE_OUT/generated_scan2scan_configs"
+SCAN2SCAN_CFG_DIR="$BASE_OUT/generated_eval_configs"
 DETAIL_CSV="$BASE_OUT/overall_detail.csv"
 TOTAL_RUNS=0
 COMPLETED_RUNS=0
@@ -63,7 +63,17 @@ validate_env() {
   done
 
   mkdir -p "$RUNS_DIR" "$OVERALL_DIR" "$SCAN2SCAN_CFG_DIR"
-  echo "dataset,scene,method,feat,dist_min,dist_max,dist_tag,test_count,seed,voxel_size,alpha,beta,rnormal,rFPFH,sr_percent,time_s,csv_path" > "$DETAIL_CSV"
+  if [[ "$EVAL_TEST_TYPE" != "scan2scan" && "$EVAL_TEST_TYPE" != "scan2map" ]]; then
+    echo "[error] EVAL_TEST_TYPE must be one of: scan2scan, scan2map" >&2
+    exit 1
+  fi
+
+  if [[ "$MAP_PREV_SCANS" -lt 0 ]]; then
+    echo "[error] MAP_PREV_SCANS must be >= 0" >&2
+    exit 1
+  fi
+
+  echo "dataset,scene,test_type,map_prev_scans,method,feat,dist_min,dist_max,dist_tag,test_count,seed,voxel_size,alpha,beta,rnormal,rFPFH,sr_percent,time_s,csv_path" > "$DETAIL_CSV"
 }
 
 load_matrix() {
@@ -161,7 +171,9 @@ build_scan2scan_config() {
     --dataset "$dataset" \
     --scene "$scene" \
     --dist_tag "$dtag" \
-    --out_cfg "$out_cfg"
+    --out_cfg "$out_cfg" \
+    --mode "$EVAL_TEST_TYPE" \
+    --map_prev_scans "$MAP_PREV_SCANS"
 }
 
 generate_pairs() {
@@ -195,7 +207,9 @@ generate_pairs() {
     --oxford_seqs "${oxford_seqs[@]}" \
     --dist_mins "${DIST_MINS[@]}" \
     --dist_maxs "${DIST_MAXS[@]}" \
-    --dist_tags "${DIST_TAGS[@]}"
+    --dist_tags "${DIST_TAGS[@]}" \
+    $( [[ "$EVAL_TEST_TYPE" == "scan2map" ]] && echo --emit_scan2map ) \
+    --map_prev_scans "$MAP_PREV_SCANS"
 }
 
 prepare_configs() {
@@ -208,7 +222,7 @@ prepare_configs() {
       local -n seqs_ref="$seq_var_name"
 
       for scene in "${seqs_ref[@]}"; do
-        out_cfg="$SCAN2SCAN_CFG_DIR/${dataset,,}_${scene,,}_d${dtag}.json"
+        out_cfg="$SCAN2SCAN_CFG_DIR/${EVAL_TEST_TYPE}_${dataset,,}_${scene,,}_d${dtag}.json"
         if [[ ! -f "$out_cfg" ]]; then
           build_scan2scan_config "$config_path" "${DATASET_LABELS[$dataset]}" "$scene" "$dtag" "$out_cfg"
         fi
@@ -235,7 +249,7 @@ run_one() {
   local run_cfg
   rnormal=$(awk -v a="$alpha" -v v="$voxel" 'BEGIN{printf "%.6f", a*v}')
   rFPFH=$(awk -v b="$beta" -v v="$voxel" 'BEGIN{printf "%.6f", b*v}')
-  run_cfg="$SCAN2SCAN_CFG_DIR/${dataset,,}_${scene,,}_d${dtag}.json"
+  run_cfg="$SCAN2SCAN_CFG_DIR/${EVAL_TEST_TYPE}_${dataset,,}_${scene,,}_d${dtag}.json"
   if [[ ! -f "$run_cfg" ]]; then
     build_scan2scan_config "$base_cfg" "$dataset" "$scene" "$dtag" "$run_cfg"
   fi
@@ -249,7 +263,8 @@ run_one() {
     --seq "$scene" \
     --feat "$feat" \
     --reg "$method" \
-    --test_type scan2scan \
+    --test_type "$EVAL_TEST_TYPE" \
+    --map_prev_scans "$MAP_PREV_SCANS" \
     --seed "$SEED" \
     --voxel_size "$voxel" \
     --rnormal "$rnormal" \
@@ -258,7 +273,7 @@ run_one() {
 
   local method_lc="${method,,}"
   local csv_path
-  csv_path=$(find "$run_out" -type f -name "*_scan2scan_*_${method_lc}.csv" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)
+  csv_path=$(find "$run_out" -type f -name "*_${EVAL_TEST_TYPE}_*_${method_lc}.csv" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)
 
   local stats
   local sr
@@ -267,7 +282,7 @@ run_one() {
   sr=${stats%,*}
   tm=${stats#*,}
 
-  echo "$dataset,$scene,$method,$feat,$dmin,$dmax,$dtag,$TEST_COUNT,$SEED,$voxel,$alpha,$beta,$rnormal,$rFPFH,$sr,$tm,$csv_path" >> "$DETAIL_CSV"
+  echo "$dataset,$scene,$EVAL_TEST_TYPE,$MAP_PREV_SCANS,$method,$feat,$dmin,$dmax,$dtag,$TEST_COUNT,$SEED,$voxel,$alpha,$beta,$rnormal,$rFPFH,$sr,$tm,$csv_path" >> "$DETAIL_CSV"
   progress_tick
 }
 
