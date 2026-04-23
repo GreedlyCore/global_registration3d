@@ -275,9 +275,11 @@ def get_quatro_solver_params(noise_bound, cfg=None):
     """
     if cfg is None:
         cfg = {}
-    quattro_noise_bound = cfg.get('noise_bound') or noise_bound
+    quatro_noise_bound = cfg.get('noise_bound') or noise_bound
+    noise_bound_coeff = cfg.get('noise_bound_coeff', 1.0)
+    effective_noise_bound = float(quatro_noise_bound) * float(noise_bound_coeff)
     return {
-        'noise_bound': float(quattro_noise_bound),
+        'noise_bound': effective_noise_bound,
         'cbar2': float(cfg.get('cbar2', 1.0)),
         'estimate_scaling': bool(cfg.get('estimate_scaling', False)),
         'rotation_gnc_factor': float(cfg.get('rotation_gnc_factor', 1.4)),

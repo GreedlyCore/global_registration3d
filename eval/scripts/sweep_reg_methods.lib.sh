@@ -24,6 +24,11 @@ SCAN2SCAN_CFG_DIR="$BASE_OUT/generated_scan2scan_configs"
 DETAIL_CSV="$BASE_OUT/overall_detail.csv"
 TEST_TYPE=${TEST_TYPE:-scan2scan}
 MAP_PREV_SCANS=${MAP_PREV_SCANS:-5}
+# Descriptor radii strategy:
+#   auto  -> use FIXED_RNORMAL/FIXED_RFPFH only when both are set, else ratio mode
+#   fixed -> always use FIXED_RNORMAL/FIXED_RFPFH (must both be set)
+#   ratio -> always compute from alpha/beta * voxel
+DESCRIPTOR_PARAM_MODE=${DESCRIPTOR_PARAM_MODE:-auto}
 TOTAL_RUNS=0
 COMPLETED_RUNS=0
 
@@ -70,7 +75,7 @@ validate_env() {
   done
 
   mkdir -p "$RUNS_DIR" "$OVERALL_DIR" "$SCAN2SCAN_CFG_DIR"
-  echo "dataset,scene,method,feat,dist_min,dist_max,dist_tag,test_count,seed,voxel_size,alpha,beta,rnormal,rFPFH,sr_percent,time_s,csv_path" > "$DETAIL_CSV"
+  echo "dataset,scene,method,feat,dist_min,dist_max,dist_tag,test_count,seed,voxel_size,alpha,beta,quatro_noise_bound_coeff,quatro_noise_bound,rnormal,rFPFH,sr_percent,time_s,csv_path" > "$DETAIL_CSV"
 }
 
 load_matrix() {
@@ -242,8 +247,29 @@ run_one() {
   local rnormal
   local rFPFH
   local run_cfg
-  rnormal=$(awk -v a="$alpha" -v v="$voxel" 'BEGIN{printf "%.6f", a*v}')
-  rFPFH=$(awk -v b="$beta" -v v="$voxel" 'BEGIN{printf "%.6f", b*v}')
+  local descriptor_mode="$DESCRIPTOR_PARAM_MODE"
+  if [[ "$descriptor_mode" == "auto" ]]; then
+    if [[ -n "${FIXED_RNORMAL:-}" && -n "${FIXED_RFPFH:-}" ]]; then
+      descriptor_mode="fixed"
+    else
+      descriptor_mode="ratio"
+    fi
+  fi
+
+  if [[ "$descriptor_mode" == "fixed" ]]; then
+    if [[ -z "${FIXED_RNORMAL:-}" || -z "${FIXED_RFPFH:-}" ]]; then
+      echo "[error] DESCRIPTOR_PARAM_MODE=fixed requires both FIXED_RNORMAL and FIXED_RFPFH" >&2
+      return 1
+    fi
+    rnormal="$FIXED_RNORMAL"
+    rFPFH="$FIXED_RFPFH"
+  elif [[ "$descriptor_mode" == "ratio" ]]; then
+    rnormal=$(awk -v a="$alpha" -v v="$voxel" 'BEGIN{printf "%.6f", a*v}')
+    rFPFH=$(awk -v b="$beta" -v v="$voxel" 'BEGIN{printf "%.6f", b*v}')
+  else
+    echo "[error] DESCRIPTOR_PARAM_MODE must be one of: auto, fixed, ratio" >&2
+    return 1
+  fi
   run_cfg="$SCAN2SCAN_CFG_DIR/${dataset,,}_${scene,,}_d${dtag}.json"
   if [[ ! -f "$run_cfg" ]]; then
     build_scan2scan_config "$base_cfg" "$dataset" "$scene" "$dtag" "$run_cfg"
@@ -268,6 +294,8 @@ run_one() {
       --voxel_size "$voxel" \
       --rnormal "$rnormal" \
       --rFPFH "$rFPFH" \
+      --quatro_noise_bound "${beta}" \
+      --quatro_noise_bound_coeff "${alpha}" \
       --out_dir "$run_out" \
       2> >(grep -Ev "$shot_warn_filter_regex" >&2)
     local run_rc=$?
@@ -288,6 +316,8 @@ run_one() {
       --voxel_size "$voxel" \
       --rnormal "$rnormal" \
       --rFPFH "$rFPFH" \
+        --quatro_noise_bound "${beta}" \
+        --quatro_noise_bound_coeff "${alpha}" \
       --out_dir "$run_out"
   fi
 
@@ -302,7 +332,7 @@ run_one() {
   sr=${stats%,*}
   tm=${stats#*,}
 
-  echo "$dataset,$scene,$method,$feat,$dmin,$dmax,$dtag,$TEST_COUNT,$SEED,$voxel,$alpha,$beta,$rnormal,$rFPFH,$sr,$tm,$csv_path" >> "$DETAIL_CSV"
+  echo "$dataset,$scene,$method,$feat,$dmin,$dmax,$dtag,$TEST_COUNT,$SEED,$voxel,$alpha,$beta,$alpha,$beta,$rnormal,$rFPFH,$sr,$tm,$csv_path" >> "$DETAIL_CSV"
   progress_tick
 }
 

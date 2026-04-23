@@ -46,6 +46,8 @@ def build_parser(cfg: Dict[str, Any]) -> argparse.ArgumentParser:
     parser.add_argument("--voxel_size", type=float, default=cfg.get("voxel_size", 0.5))
     parser.add_argument("--rnormal", type=float, default=None)
     parser.add_argument("--rFPFH", type=float, default=None)
+    parser.add_argument("--quatro_noise_bound", type=float, default=None)
+    parser.add_argument("--quatro_noise_bound_coeff", type=float, default=None)
     parser.add_argument("--re_thre", type=float, default=cfg.get("re_thre", 5.0))
     parser.add_argument("--te_thre", type=float, default=cfg.get("te_thre", 2.0))
     parser.add_argument("--out_dir", default=cfg.get("out_dir", "results"))
@@ -81,6 +83,10 @@ def finalize_args(
         args.feat_cfg["rnormal"] = float(args.rnormal)
     if args.rFPFH is not None:
         args.feat_cfg["rFPFH"] = float(args.rFPFH)
+    if args.quatro_noise_bound is not None:
+        args.quatro["noise_bound"] = float(args.quatro_noise_bound)
+    if args.quatro_noise_bound_coeff is not None:
+        args.quatro["noise_bound_coeff"] = float(args.quatro_noise_bound_coeff)
 
     args.test_scans = cfg.get("test_scans", [])
     args.test_scan2map = cfg.get("test_scan2map", [])
